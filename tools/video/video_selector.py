@@ -77,6 +77,19 @@ class VideoSelector(BaseTool):
                 "type": "string",
                 "description": "Required API host, e.g. fal.ai, atlascloud, replicate.",
             },
+            "request_mode": {"type": "string", "enum": ["async"]},
+            "provider_params": {"type": "object"},
+            "resume_job": {"type": "object"},
+            "job_path": {"type": "string"},
+            "poll_timeout": {"type": "number", "exclusiveMinimum": 0},
+            "poll_interval": {"type": "number", "exclusiveMinimum": 0},
+            "size": {"type": "string"},
+            "seconds": {"type": "number"},
+            "duration_seconds": {"type": "number"},
+            "image_path": {"type": "string"},
+            "seed": {"type": "integer"},
+            "generate_audio": {"type": "boolean"},
+            "negative_prompt": {"type": "string"},
             "prompt": {"type": "string"},
             "preferred_provider": {
                 "type": "string",
@@ -367,6 +380,12 @@ class VideoSelector(BaseTool):
 
     def execute(self, inputs: dict[str, object]) -> ToolResult:
         from lib.scoring import rank_providers
+        from tools.provider_routing import explicit_model, newapi_inputs
+
+        try:
+            explicit_model(inputs)
+        except ValueError as exc:
+            return ToolResult(success=False, error=str(exc))
 
         candidates = self._providers()
 
@@ -394,7 +413,7 @@ class VideoSelector(BaseTool):
             )
 
         # Adapt input keys: stock tools use 'query' while generators use 'prompt'
-        adapted = dict(inputs)
+        adapted = newapi_inputs(inputs, self.capability) if tool.provider == "newapi" else dict(inputs)
         if hasattr(tool, "input_schema"):
             required = tool.input_schema.get("properties", {})
             if "query" in required and "query" not in adapted:
@@ -406,7 +425,7 @@ class VideoSelector(BaseTool):
         ):
             tool_props = getattr(tool, "input_schema", {}).get("properties", {})
             # If the provider uses image_url (not reference_image_path), upload and convert
-            if "image_url" in tool_props and "image_url" not in adapted:
+            if "image_url" in tool_props and "image_url" not in adapted and not tool.supports.get("local_reference_image"):
                 try:
                     from tools.video._shared import upload_image_fal
 
@@ -574,7 +593,8 @@ class VideoSelector(BaseTool):
         from tools.provider_routing import filter_explicit_route
 
         candidates = filter_explicit_route(inputs, candidates)
-        exact_model = inputs.get("model")
+        from tools.provider_routing import explicit_model
+        exact_model = explicit_model(inputs)
         if exact_model:
             model_matches = [
                 tool

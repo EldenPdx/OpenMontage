@@ -14,6 +14,8 @@ This stage builds the beat map, selected lines, title-card copy, and reveal stru
 
 ## Process
 
+When an approved plan selects `newapi_llm` for drafting, read [`skills/core/newapi.md`](../../core/newapi.md) for explicit registry calls, model/protocol selection and cost approval. Adapt completed output into the existing script schema and keep the normal review/checkpoint gates.
+
 ### 1. Build A Beat Map First
 
 Use a simple structure:

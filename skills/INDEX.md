@@ -55,6 +55,7 @@ Key capability families to look for in the output:
 | `tts` | `tts_selector` | Auto-discovers all `capability="tts"` tools |
 | `video_generation` | `video_selector` | Auto-discovers all `capability="video_generation"` tools |
 | `image_generation` | `image_selector` | Auto-discovers all `capability="image_generation"` tools |
+| `text_generation` | — | Explicit registry text tools; using one does not replace the chat's agent model |
 | `audio_processing` | — | FFmpeg-based local tools |
 | `enhancement` | — | Mixed providers |
 | `analysis` | — | Mixed providers |
@@ -84,6 +85,7 @@ Key capability families to look for in the output:
 
 | Skill | File | Trigger | Agent Skills (Layer 3) |
 |-------|------|---------|----------------------|
+| New API | `core/newapi.md` | Configured gateway text/media, strict routing, single-key setup, or media-job recovery | Selected tool's declared provider skills |
 | FFmpeg | `core/ffmpeg.md` | Video encoding, filtering, composition | `ffmpeg`, `video-toolkit` |
 | Remotion | `core/remotion.md` | React-based composition, Phase 3+ | `remotion-best-practices`, `remotion` |
 | HyperFrames | `core/hyperframes.md` | HTML/CSS/GSAP composition runtime — kinetic typography, music-to-video, product promos, website capture. Vendored at v0.7.17 (2026-06-27). | `hyperframes` (router) → `hyperframes-core` (contract), `hyperframes-creative` (palette/type/narration), `hyperframes-media` (TTS/BGM/SFX/captions), `hyperframes-animation` (all motion), `hyperframes-cli`, `hyperframes-registry`, `media-use`, `motion-graphics`, `music-to-video` (beats-driven), `website-to-video`, `remotion-to-hyperframes` (migration), `gsap-core`, `gsap-timeline` |

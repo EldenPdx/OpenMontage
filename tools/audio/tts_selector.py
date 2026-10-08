@@ -55,6 +55,14 @@ class TTSSelector(BaseTool):
                 "type": "string",
                 "description": "Required API host, e.g. fal.ai, atlascloud, replicate.",
             },
+            "model": {"type": "string"},
+            "model_name": {"type": "string"},
+            "provider_params": {"type": "object"},
+            "format": {"type": "string"},
+            "output_format": {"type": "string"},
+            "response_format": {"type": "string"},
+            "stream_format": {"type": "string"},
+            "target_operation": {"type": "string"},
             "text": {"type": "string"},
             "voice_id": {
                 "type": "string",
@@ -165,7 +173,7 @@ class TTSSelector(BaseTool):
             },
             "operation": {
                 "type": "string",
-                "enum": ["generate", "rank"],
+                "enum": ["generate", "speech", "rank"],
                 "default": "generate",
                 "description": "Operation mode. 'rank' returns scored provider rankings without generating.",
             },
@@ -210,11 +218,18 @@ class TTSSelector(BaseTool):
 
     def execute(self, inputs: dict[str, Any]) -> ToolResult:
         from lib.scoring import rank_providers
+        from tools.provider_routing import explicit_model
 
-        task_context = self._prepare_task_context(inputs)
+        try:
+            explicit_model(inputs)
+        except ValueError as exc:
+            return ToolResult(success=False, error=str(exc))
+
+        route_inputs = {**inputs, "operation": inputs.get("target_operation", "speech")} if inputs.get("operation") == "rank" else inputs
+        task_context = self._prepare_task_context(route_inputs)
         from tools.provider_routing import filter_explicit_route
 
-        candidates = filter_explicit_route(inputs, self._providers())
+        candidates = filter_explicit_route(route_inputs, self._providers())
 
         # Rank mode — return scored provider rankings without generating
         if inputs.get("operation") == "rank":
@@ -254,6 +269,9 @@ class TTSSelector(BaseTool):
     def _adapt_inputs(tool: BaseTool, inputs: dict[str, Any]) -> dict[str, Any]:
         """Translate capability-level controls to provider-native inputs."""
         adapted = dict(inputs)
+        if tool.provider == "newapi":
+            from tools.provider_routing import newapi_inputs
+            return newapi_inputs(inputs, tool.capability)
         if tool.name != "azure_tts":
             return adapted
 

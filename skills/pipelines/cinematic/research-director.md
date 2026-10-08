@@ -18,6 +18,8 @@ Unlike explainer research (which focuses on facts, data, and content gaps), cine
 
 ## Process
 
+If an explicitly approved plan includes `newapi_llm` for additional text synthesis, read [`skills/core/newapi.md`](../../core/newapi.md) for protocol, cost and artifact handling. Keep source research on the search/fetch path; gateway output still needs source verification and canonical-artifact validation.
+
 ### Step 0: Check for Reference Video Context
 
 Before starting research, check if a VideoAnalysisBrief exists for this project. If it

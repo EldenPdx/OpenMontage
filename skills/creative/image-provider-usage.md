@@ -5,6 +5,8 @@
 
 ## Provider Landscape
 
+When a run selects a configured New API gateway, read [`skills/core/newapi.md`](../core/newapi.md) for strict selector routing, declared edit/async parameters, cost approval and task recovery before calling the image tool.
+
 ### Generation Providers (AI creates the image)
 
 | Tool | Provider | Cost | Speed | Best For |

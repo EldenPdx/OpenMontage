@@ -270,6 +270,12 @@ HEYGEN_API_KEY=your-key        # HeyGen — VEO, Sora, Runway, Kling via single 
 RUNWAY_API_KEY=your-key        # Runway Gen-4 direct
 ```
 
+### Use an administrator-configured New API gateway
+
+With the gateway address, default models and verified capability profiles already configured by your administrator, one `NEW_API_KEY` enables the declared text, image, video and speech routes. Use `hosting_provider="newapi"` or an exact `preferred_tool` in the existing selectors; unknown prices require a deployment quote and the normal budget approval. Media jobs retain their public IDs for GET-only recovery, and downloads validate before replacing existing assets.
+
+See [New API configuration and usage](skills/core/newapi.md) for deployment profiles, registry/selector examples, protocol and permission requirements, and result-expiry limits. `newapi_llm` is an explicit text tool; it does not change the AI model running your chat. Existing direct providers retain their own keys and behavior.
+
 <details>
 <summary><strong>Have a GPU? Unlock free local video generation</strong></summary>
 

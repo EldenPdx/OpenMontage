@@ -19,6 +19,8 @@ The script is the backbone of the video. Every visual, every scene, every audio 
 
 ## Process
 
+When an approved plan selects `newapi_llm` for drafting, read [`skills/core/newapi.md`](../../core/newapi.md) for explicit registry calls, model/protocol selection and cost approval. Adapt completed output into the existing script schema and keep the normal review/checkpoint gates.
+
 ### Step 1: Absorb the Proposal and Research
 
 Read the `proposal_packet.selected_concept` carefully. Extract:

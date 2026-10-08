@@ -60,6 +60,18 @@ class ImageSelector(BaseTool):
                 "type": "string",
                 "description": "Required API host, e.g. fal.ai, atlascloud, replicate.",
             },
+            "request_mode": {"type": "string", "enum": ["sync", "async"]},
+            "provider_params": {"type": "object"},
+            "resume_job": {"type": "object"},
+            "job_path": {"type": "string"},
+            "poll_timeout": {"type": "number", "exclusiveMinimum": 0},
+            "poll_interval": {"type": "number", "exclusiveMinimum": 0},
+            "size": {"type": "string"},
+            "quality": {"type": "string"},
+            "response_format": {"type": "string"},
+            "mask_path": {"type": "string"},
+            "mask_url": {"type": "string"},
+            "target_operation": {"type": "string"},
             "prompt": {
                 "type": "string",
                 "description": "Image description (used as prompt for generation or query for stock)",
@@ -173,7 +185,7 @@ class ImageSelector(BaseTool):
             },
             "operation": {
                 "type": "string",
-                "enum": ["generate", "rank"],
+                "enum": ["generate", "edit", "rank"],
                 "default": "generate",
                 "description": "Operation mode. 'rank' returns scored provider rankings without generating.",
             },
@@ -255,10 +267,17 @@ class ImageSelector(BaseTool):
     def execute(self, inputs: dict[str, Any]) -> ToolResult:
         import logging
         from lib.scoring import rank_providers
+        from tools.provider_routing import explicit_model, newapi_inputs
+
+        try:
+            explicit_model(inputs)
+        except ValueError as exc:
+            return ToolResult(success=False, error=str(exc))
 
         logger = logging.getLogger(__name__)
-        task_context = self._prepare_task_context(inputs)
-        candidates = self._filter_candidates(inputs, self._providers())
+        route_inputs = {**inputs, "operation": inputs.get("target_operation", "generate")} if inputs.get("operation") == "rank" else inputs
+        task_context = self._prepare_task_context(route_inputs)
+        candidates = self._filter_candidates(route_inputs, self._providers())
 
         # Rank mode — return scored provider rankings without generating
         if inputs.get("operation") == "rank":
@@ -278,7 +297,7 @@ class ImageSelector(BaseTool):
             return ToolResult(success=False, error="No image provider available.")
 
         # Adapt input keys: stock tools use 'query' while generators use 'prompt'
-        adapted = dict(inputs)
+        adapted = newapi_inputs(inputs, self.capability) if tool.provider == "newapi" else dict(inputs)
         if hasattr(tool, "input_schema"):
             props = tool.input_schema.get("properties", {})
             if "query" in props and "query" not in adapted:
@@ -310,7 +329,7 @@ class ImageSelector(BaseTool):
         adapted.pop("hosting_provider", None)
 
         # Pass through generation params only to tools that accept them.
-        if hasattr(tool, "input_schema"):
+        if hasattr(tool, "input_schema") and tool.provider != "newapi":
             props = tool.input_schema.get("properties", {})
             stripped = []
             for passthrough_key in (
@@ -454,7 +473,8 @@ class ImageSelector(BaseTool):
         from tools.provider_routing import filter_explicit_route
 
         candidates = filter_explicit_route(inputs, candidates)
-        exact_model = inputs.get("model")
+        from tools.provider_routing import explicit_model
+        exact_model = explicit_model(inputs)
         if exact_model:
             model_matches = [
                 tool
