@@ -1,0 +1,15 @@
+{
+  "provenance": {
+    "repository": "xvanai-new",
+    "commit": "00e4e91602df6b3c3c1f39d05e2ae704ad3f6d6a",
+    "sources": ["router/relay-router.go", "relay/audio_handler.go", "relaykit/dto/audio.go", "relay/channel/openai/audio.go"],
+    "constructed": true,
+    "note": "Public DTO and binary relay shape; fake key/model/voice, no private traffic. Tests create 0.2-second 8kHz mono PCM WAV using stdlib wave and convert to MP3 with local FFmpeg. PCM sampling facts are explicit synthetic deployment data."
+  },
+  "request": {
+    "method": "POST", "path": "/v1/audio/speech", "authentication": "Bearer",
+    "body": {"model": "deployment-speech", "input": "Hello.", "voice": "alloy", "response_format": "wav", "speed": 1}
+  },
+  "response": {"status": 200, "content_type": "audio/wav", "body_kind": "binary"},
+  "unsupported_initially": ["SSE stream_format", "PCM without deployment sampling facts"]
+}
