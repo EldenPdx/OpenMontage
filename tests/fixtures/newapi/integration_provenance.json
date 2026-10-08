@@ -1,0 +1,56 @@
+{
+  "construction": "offline synthetic HTTP service with real registry, selectors, codecs, filesystem and media probes; not live gateway evidence",
+  "upstream_sha": "00e4e91602df6b3c3c1f39d05e2ae704ad3f6d6a",
+  "openmontage_baseline_sha": "9327439db69021ab4b0e2776729bf3b58fdb5a87",
+  "source_contracts": {
+    "models": [
+      "controller/model.go:163 buildOpenAIModel",
+      "controller/model.go:218 ListModels",
+      "router/relay-router.go:25 modelsRouter"
+    ],
+    "messages": [
+      "relaykit/dto/claude.go:227 ClaudeRequest",
+      "relaykit/dto/claude.go:532 ClaudeResponse",
+      "relay/helper/common.go:77 ClaudeChunkData"
+    ],
+    "responses": [
+      "relaykit/dto/openai_request.go:1046 OpenAIResponsesRequest",
+      "relaykit/dto/openai_response.go:331 OpenAIResponsesResponse",
+      "relaykit/dto/openai_response.go:567 ResponsesStreamResponse"
+    ],
+    "images": [
+      "relaykit/dto/openai_image.go:24 ImageRequest",
+      "relay/helper/valid_request.go:183 GetAndValidOpenAIImageRequest",
+      "controller/async_image.go:322 asyncImageTaskJSON",
+      "controller/async_image.go:375 asyncImagePublicStatus"
+    ],
+    "videos": [
+      "plugins/tasks/sora/plugin.js:316 protocols.openai_video",
+      "controller/relay.go:758 presentTaskSubmission",
+      "controller/video_proxy.go:62 VideoProxy"
+    ],
+    "speech": [
+      "relaykit/dto/audio.go:11 AudioRequest",
+      "relay/channel/openai/audio.go:21 OpenaiTTSHandler"
+    ]
+  },
+  "reused_fixtures": [
+    "deployment.yaml",
+    "models.json",
+    "llm_messages.json",
+    "llm_messages.sse",
+    "llm_responses.json",
+    "llm_responses.sse",
+    "image_sample.png",
+    "image_result.json"
+  ],
+  "media_generation": {
+    "PNG": "image_sample.png: local Pillow RGB solid image, 3x2 pixels; see image_provenance.json",
+    "WAV": "stdlib wave: 8000 Hz, mono, 16-bit PCM, 1600 silent samples, 0.2 seconds",
+    "MP4": "ffmpeg -y -f lavfi -i color=c=blue:s=64x48:r=10:d=0.3 -c:v libx264 -pix_fmt yuv420p sample.mp4; tiny synthetic file generated in pytest tmp directory"
+  },
+  "tls_redirect": "Ephemeral loopback HTTPS service and self-signed localhost certificate generated at test runtime by OpenSSL; requests trusts that certificate through temporary process environment. No certificate/private key committed.",
+  "artifact_flow": "Actual structured LLM JSON is validated against script.schema.json. Actual image/video/audio paths feed asset_manifest and Backlot. Optional numeric prices are omitted, metadata cost_status unquoted. Existing legacy public checkpoint handoff explicitly requires human approval; script/assets remain awaiting_human and no creative stage is completed or approved by test outputs.",
+  "identity_and_cost": "Visible deployment model aliases, all task/request IDs, timestamps and usage are synthetic. Mock POST counts verify client no-resubmit behavior, not vendor charging. Media dimensions/durations prove local probes, not a deployed model output promise.",
+  "live_status": "NOT RUN: no usable deployment gateway address + NEW_API_KEY was found during source audit; deployment revision/plugins/permissions/balance/quality remain live opt-in checks owned by the deployer."
+}

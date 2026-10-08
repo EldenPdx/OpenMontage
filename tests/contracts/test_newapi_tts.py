@@ -325,3 +325,15 @@ def test_truncated_mp3_seek_frame_count_preserves_previous_asset(gateway, tmp_pa
     assert not result.success
     assert target.read_bytes() == b"previous-valid-asset"
     assert len(gateway["requests"]) == 1
+
+
+def test_audio_paths_with_ordinary_bearer_words_remain_usable(gateway, tmp_path):
+    from tools.audio.newapi_tts import NewAPITTS
+
+    output = tmp_path / "projects/Bearer bonds/assets/audio/narration.wav"
+    result = NewAPITTS(config_path=gateway["config_path"]).execute({"text": "Hello.", "output_path": str(output)})
+
+    assert result.success, result.error
+    assert result.data["output"] == str(output)
+    assert result.artifacts == [str(output)]
+    assert output.is_file()

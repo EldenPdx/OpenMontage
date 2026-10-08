@@ -324,3 +324,31 @@ class ClientContract(unittest.TestCase):
             client.request('POST','/v1/audio/speech',stream=True)
         self.assertTrue(raised.exception.outcome_unknown)
         self.assertEqual(session.request.call_count,1)
+
+    def test_generic_media_redaction_preserves_bearer_project_paths_and_model_names(self):
+        import base64
+        import io
+        import tempfile
+        from pathlib import Path
+        from PIL import Image
+        from tools._newapi.client import NewAPIClient,redact
+        buffer = io.BytesIO()
+        Image.new('RGB',(2,2),'red').save(buffer,format='PNG')
+        source = 'data:image/png;base64,' + base64.b64encode(buffer.getvalue()).decode()
+        client = NewAPIClient(NewAPISettings(NewAPIConfig(base_url='https://media-path.example'),'test-secret'))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'projects/Bearer bonds/assets/images/image.png'
+            output = client.download_media(source,path,kind='image')
+            data = redact({'output':output,'model':'Bearer model','revised_prompt':'Draw bearer bonds'},'test-secret')
+            self.assertEqual(data['output'],str(path))
+            self.assertTrue(Path(data['output']).is_file())
+            self.assertEqual(data['model'],'Bearer model')
+            self.assertEqual(data['revised_prompt'],'Draw bearer bonds')
+
+    def test_error_only_messages_mask_unknown_bearer_credentials_without_a_configured_key(self):
+        from unittest.mock import patch
+        from tools._newapi.client import safe_message,sanitize_error
+        self.assertEqual(safe_message('Authorization: Bearer another-secret'), 'Authorization: Bearer [redacted]')
+        with patch.dict('os.environ',{},clear=True):
+            error = sanitize_error(None,ValueError('Authorization: Bearer another-secret'))
+        self.assertNotIn('another-secret',str(error))

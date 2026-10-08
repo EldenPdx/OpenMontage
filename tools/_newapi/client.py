@@ -35,12 +35,12 @@ def redact(value, api_key='', *, drop_credentials=True):
         return value
     if api_key:
         value = value.replace(api_key, '[redacted]')
-    value = re.sub(r'Bearer\s+[^\s,;]+', 'Bearer [redacted]', value, flags=re.I)
     return value
 
 
 def safe_message(value, api_key=''):
     value = redact(str(value), api_key)
+    value = re.sub(r'Bearer\s+[^\s,;]+', 'Bearer [redacted]', value, flags=re.I)
     def safe_url(match):
         try:
             parts = urlsplit(match.group(0))

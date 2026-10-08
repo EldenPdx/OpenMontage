@@ -358,3 +358,17 @@ class LLMContract(unittest.TestCase):
         self.assertTrue(result.success,result.error)
         self.assertEqual(result.data['tool_calls'][0]['input'],{**arguments,'echo':'[redacted]'})
         self.assertEqual(result.data['content'][0]['input'],{**arguments,'echo':'[redacted]'})
+
+    def test_bearer_prose_and_tutorial_values_survive_native_results_without_known_keys(self):
+        text = 'Bearer bonds are transferable. Use Authorization: Bearer YOUR_TOKEN.'
+        arguments = {'term':'Bearer bonds','example':'Bearer YOUR_TOKEN','actual_credential':'Bearer test-llm-key'}
+        payload = {'status':'completed','output':[
+            {'type':'message','content':[{'type':'output_text','text':text}]},
+            {'type':'function_call','name':'plan','call_id':'c1','arguments':arguments}
+        ]}
+        with patch('requests.Session.request',return_value=wire_response(payload)):
+            result = self.tool().execute({'messages':[{'role':'user','content':'Explain bearer bonds'}]})
+        self.assertTrue(result.success,result.error)
+        self.assertEqual(result.data['text'],text)
+        self.assertEqual(result.data['tool_calls'][0]['arguments'],{**arguments,'actual_credential':'Bearer [redacted]'})
+        self.assertNotIn('test-llm-key',json.dumps(result.data))
