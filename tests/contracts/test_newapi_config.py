@@ -108,3 +108,56 @@ class ConfigContract(unittest.TestCase):
         from tools._newapi.models import resolve_model
         settings = NewAPISettings(NewAPIConfig.model_validate({'default_models':{'text_generation':'dual'}, 'models':{'dual':{'capabilities':['text_generation'],'protocols':['anthropic','responses']}}}), 'test-only')
         self.assertEqual(resolve_model(settings,'text_generation',protocol='auto').protocol,'responses')
+
+    def test_job_identity_never_persists_or_rewrites_a_gateway_key(self):
+        from lib.config_model import NewAPIConfig
+        from tools._newapi.config import NewAPISettings
+        from tools._newapi.models import make_job,validate_resume
+        settings = NewAPISettings(NewAPIConfig.model_validate({'base_url':'https://job-secrets.example','models':{'image':{'capabilities':['image_generation'],'operations':['async'],'supports_async':True}}}), 'test-secret')
+        common = {'tool':'newapi_image','model':'image','operation':'generate','request_mode':'async','id':'task-safe','output_path':'safe.png'}
+        for overrides in [{'id':'task-test-secret'}, {'output_path':'test-secret.png'}, {'model':'test-secret'}]:
+            with self.assertRaises(ValueError):
+                make_job(settings,**{**common,**overrides})
+        job = make_job(settings,**common)
+        with self.assertRaises(ValueError):
+            validate_resume(settings,{**job,'id':'task-test-secret'},tool='newapi_image')
+
+    def test_invalid_deployment_defaults_or_schemas_cannot_advertise_models(self):
+        from lib.config_model import NewAPIConfig
+        for limits, default in [({'type':'number','maximum':4},99),({'type':'not-a-json-schema-type'},1)]:
+            with self.assertRaises(ValueError) as raised:
+                NewAPIConfig.model_validate({'models':{'speech':{'capabilities':['tts'],'supported_parameters':['speed'],'defaults':{'speed':default},'limits':{'speed':limits}}}})
+            self.assertIn('speed',str(raised.exception))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'config.yaml'
+            path.write_text('newapi:\n  base_url: https://invalid-profile.example\n  models:\n    text:\n      capabilities: [text_generation]\n      protocols: [responses]\n      operations: [responses]\n      supported_parameters: [temperature]\n      defaults: {temperature: 99}\n      limits:\n        temperature: {type: number, maximum: 1}\n')
+            from tools.newapi_llm import NewAPILLM
+            with patch.dict(os.environ,{'NEW_API_KEY':'test-only','NEW_API_BASE_URL':''},clear=True):
+                tool = NewAPILLM(config_path=path)
+                self.assertEqual(tool.get_status().value,'unavailable')
+                self.assertEqual(tool.get_info()['model_catalog'],{})
+
+    def test_nonfinite_http_and_poll_timeouts_are_invalid_deployment_values(self):
+        from lib.config_model import NewAPIConfig
+        for field in ['connect_timeout','read_timeout','poll_timeout','poll_interval']:
+            for value in [float('inf'),float('nan')]:
+                with self.assertRaises(ValueError):
+                    NewAPIConfig(**{field:value})
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'config.yaml'
+            path.write_text('newapi:\n  read_timeout: .inf\n')
+            from tools._newapi.config import load_settings
+            with self.assertRaises(ValueError):
+                load_settings(path)
+
+    def test_parent_configuration_errors_never_echo_forbidden_yaml_secrets(self):
+        from tools.newapi_llm import NewAPILLM
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'config.yaml'
+            path.write_text('newapi:\n  api_key: different-secret\n')
+            with patch.dict(os.environ,{'NEW_API_KEY':'test-only','NEW_API_BASE_URL':''},clear=True):
+                result = NewAPILLM(config_path=path).execute({'messages':[{'role':'user','content':'Hello'}]})
+                info = NewAPILLM(config_path=path).get_info()
+            self.assertFalse(result.success)
+            self.assertNotIn('different-secret',str(result))
+            self.assertNotIn('different-secret',str(info))

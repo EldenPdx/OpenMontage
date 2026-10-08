@@ -26,11 +26,11 @@ class NewAPIError(ValueError):
         return {'code': self.code, 'message': str(self), 'status': self.status, 'request_id': self.request_id, 'outcome_unknown': self.outcome_unknown}
 
 
-def redact(value, api_key=''):
+def redact(value, api_key='', *, drop_credentials=True):
     if isinstance(value, dict):
-        return {key: redact(item, api_key) for key, item in value.items() if str(key).lower().replace('-', '_') not in {'key', 'api_key', 'new_api_key', 'authorization', 'x_api_key', 'headers', 'token', 'access_token', 'secret'}}
+        return {redact(key, api_key, drop_credentials=drop_credentials): redact(item, api_key, drop_credentials=drop_credentials) for key, item in value.items() if not drop_credentials or str(key).lower().replace('-', '_') not in {'key', 'api_key', 'new_api_key', 'authorization', 'x_api_key', 'headers', 'token', 'access_token', 'secret'}}
     if isinstance(value, list):
-        return [redact(item, api_key) for item in value]
+        return [redact(item, api_key, drop_credentials=drop_credentials) for item in value]
     if not isinstance(value, str):
         return value
     if api_key:
@@ -106,12 +106,14 @@ class NewAPIClient:
             raise NewAPIError('invalid_endpoint', 'New API endpoint must be a fixed adapter path')
         return self.settings.config.base_url + path[3:]
 
-    def _error(self, response):
+    def _error(self, response, receipt=False):
         payload = None
         try:
             payload = response.json()
-        except (ValueError, requests.RequestException):
+        except ValueError:
             pass
+        if receipt and response.status_code < 300 and isinstance(payload,dict) and payload.get('object') in {'task','video'} and isinstance(payload.get('id'),str) and re.fullmatch(r'[A-Za-z0-9_-]+',payload['id']):
+            return
         failed = isinstance(payload, dict) and (payload.get('error') or payload.get('success') is False or payload.get('status') in {'failed', 'error', 'cancelled', 'canceled'})
         if response.status_code >= 400 or failed:
             error = payload.get('error') if isinstance(payload, dict) else None
@@ -121,10 +123,12 @@ class NewAPIClient:
             request_id = response.headers.get('x-request-id') or (payload.get('request_id') if isinstance(payload, dict) else None)
             raise NewAPIError(safe_message(code, self.settings.api_key), safe_message(message, self.settings.api_key), status=response.status_code, request_id=safe_message(request_id, self.settings.api_key) if request_id is not None else None)
 
-    def request(self, method, path, *, json=None, data=None, files=None, stream=False, deadline=None, headers=None, _media_redirect=False):
+    def request(self, method, path, *, json=None, data=None, files=None, stream=False, deadline=None, headers=None, receipt=False, _media_redirect=False):
         method = method.upper()
         if method not in {'GET', 'POST'}:
             raise NewAPIError('invalid_method', 'New API supports GET and POST adapter requests')
+        if receipt and (method != 'POST' or path not in {'/v1/videos','/v1/async/images/generations','/v1/async/images/edits'}):
+            raise NewAPIError('invalid_receipt_mode','Task receipt mode is only valid for fixed asynchronous submission endpoints')
         url = self._url(path)
         config = self.settings.config
         deadline = deadline if deadline is not None else time.monotonic() + config.connect_timeout + config.read_timeout
@@ -139,12 +143,13 @@ class NewAPIClient:
                 raise NewAPIError('deadline_exceeded', 'New API request deadline exceeded')
             response = None
             try:
-                response = self.session.request(method, url, headers=request_headers, json=json, data=data, files=files, stream=stream, allow_redirects=False, timeout=Timeout(total=remaining, connect=min(config.connect_timeout, remaining), read=min(config.read_timeout, remaining)))
+                # Explicit auth blocks .netrc overrides while keeping environment proxies.
+                response = self.session.request(method, url, headers=request_headers, json=json, data=data, files=files, stream=stream, allow_redirects=False, auth=lambda prepared: prepared, timeout=Timeout(total=remaining, connect=min(config.connect_timeout, remaining), read=min(config.read_timeout, remaining)))
                 if 300 <= response.status_code < 400 and not _media_redirect:
                     raise NewAPIError('redirect_rejected', 'Gateway API redirect rejected', status=response.status_code)
                 # Successful binary/SSE responses must remain streaming.
                 if not stream or response.status_code >= 400 or 'json' in response.headers.get('Content-Type', '').lower():
-                    self._error(response)
+                    self._error(response,receipt=receipt)
                 response._newapi_paid = method == 'POST'
                 response._newapi_deadline = deadline
                 return response
@@ -263,7 +268,7 @@ class NewAPIClient:
                 if remaining <= 0:
                     raise NewAPIError('deadline_exceeded', 'Media download deadline exceeded')
                 try:
-                    response = anonymous.get(url, stream=True, allow_redirects=False, timeout=min(remaining, self.settings.config.read_timeout))
+                    response = anonymous.get(url, stream=True, allow_redirects=False, auth=lambda prepared: prepared, timeout=min(remaining, self.settings.config.read_timeout))
                 except requests.RequestException:
                     raise NewAPIError('download_interrupted', 'Media download connection interrupted') from None
                 if 300 <= response.status_code < 400:
@@ -276,6 +281,8 @@ class NewAPIClient:
                 if response.status_code >= 400:
                     try:
                         self._error(response)
+                    except requests.RequestException:
+                        raise NewAPIError('download_interrupted', 'Media error response was interrupted') from None
                     finally:
                         response.close()
                 return self.write_binary(response, output_path, kind=kind, deadline=deadline, **kwargs)

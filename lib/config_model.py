@@ -12,6 +12,7 @@ from typing import Optional
 from urllib.parse import urlsplit, urlunsplit
 
 import yaml
+from jsonschema import Draft202012Validator, SchemaError, ValidationError
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 
 
@@ -65,6 +66,13 @@ class NewAPIModelProfile(BaseModel):
         reserved = {"api_key", "key", "authorization", "headers", "base_url", "url", "endpoint", "model", "protocol", "operation", "stream", "background", "request_mode", "async"}
         if reserved.intersection(self.supported_parameters) or set(self.defaults) - set(self.supported_parameters) or set(self.limits) - set(self.supported_parameters) or reserved.intersection(self.parameter_map.values()):
             raise ValueError("Profile parameters must be declared and cannot contain routing or credentials")
+        for name, schema in self.limits.items():
+            try:
+                Draft202012Validator.check_schema(schema)
+                if name in self.defaults:
+                    Draft202012Validator(schema).validate(self.defaults[name])
+            except (ValidationError, SchemaError):
+                raise ValueError(f"Invalid deployment default or parameter schema for {name!r}") from None
         return self
 
 
@@ -74,10 +82,10 @@ class NewAPIConfig(BaseModel):
     default_models: dict[str, str] = Field(default_factory=dict)
     models: dict[str, NewAPIModelProfile] = Field(default_factory=dict)
     default_llm_protocol: str = "responses"
-    connect_timeout: float = Field(default=10, gt=0)
-    read_timeout: float = Field(default=180, gt=0)
-    poll_timeout: float = Field(default=600, gt=0)
-    poll_interval: float = Field(default=2, gt=0)
+    connect_timeout: float = Field(default=10, gt=0, allow_inf_nan=False)
+    read_timeout: float = Field(default=180, gt=0, allow_inf_nan=False)
+    poll_timeout: float = Field(default=600, gt=0, allow_inf_nan=False)
+    poll_interval: float = Field(default=2, gt=0, allow_inf_nan=False)
     get_retries: int = Field(default=2, ge=0, le=5)
 
     @field_validator("base_url")
@@ -144,6 +152,8 @@ class PathsConfig(BaseModel):
 
 class OpenMontageConfig(BaseModel):
     """Top-level runtime configuration."""
+
+    model_config = ConfigDict(hide_input_in_errors=True)
 
     llm: LLMConfig = Field(default_factory=LLMConfig)
     budget: BudgetConfig = Field(default_factory=BudgetConfig)

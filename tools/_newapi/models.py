@@ -111,6 +111,8 @@ def make_job(settings, *, tool, model, operation, request_mode, id, output_path,
         raise ValueError('Submitted task has no public id; outcome unknown')
     from tools._newapi.client import task_path
     task_path('tasks', id)
+    if settings.api_key and any(settings.api_key in str(value) for value in (tool,model,operation,request_mode,id,settings.config.base_url,output_path)):
+        raise ValueError('Job identity contains a credential; refusing to persist it')
     # Keep a useful, small summary; prompts and reference media do not belong in jobs.
     safe_params = {key: value for key, value in (params or {}).items() if key in {'seconds', 'size', 'n', 'quality', 'response_format', 'voice', 'speed'} and isinstance(value, (str, int, float, bool))}
     from tools._newapi.client import redact
@@ -124,6 +126,8 @@ def validate_resume(settings, job, *, tool, model=None, operation=None, output_p
         raise ValueError('Resume job contains unsupported fields')
     from tools._newapi.client import task_path
     task_path('tasks', job['id'])
+    if settings.api_key and any(settings.api_key in str(job[field]) for field in ('tool','model','operation','request_mode','id','base_url','output_path','submitted_at')):
+        raise ValueError('Resume job identity contains a credential')
     if job['tool'] != tool or (model and job['model'] != model) or (operation and job['operation'] != operation) or job['request_mode'] != 'async':
         raise ValueError('Resume job does not match this tool, model or operation')
     if normalize_newapi_url(job['base_url']) != settings.config.base_url:

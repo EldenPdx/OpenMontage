@@ -1,0 +1,44 @@
+{
+  "id": "resp-fixture",
+  "object": "response",
+  "model": "deployment-text",
+  "status": "completed",
+  "output": [
+    {
+      "type": "reasoning",
+      "id": "rs-fixture",
+      "summary": [
+        {
+          "type": "summary_text",
+          "text": "native summary"
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "id": "m-fixture",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "Rain "
+        },
+        {
+          "type": "output_text",
+          "text": "scene"
+        }
+      ]
+    },
+    {
+      "type": "function_call",
+      "id": "fc-fixture",
+      "call_id": "call-fixture",
+      "name": "plan",
+      "arguments": "{\"scene\":1}"
+    }
+  ],
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 12
+  }
+}

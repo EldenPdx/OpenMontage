@@ -1,0 +1,24 @@
+{
+  "upstream_repository": "xvanai-new",
+  "upstream_sha": "00e4e91602df6b3c3c1f39d05e2ae704ad3f6d6a",
+  "construction": "hand_constructed_from_source",
+  "contains_live_requests": false,
+  "fixtures": {
+    "llm_messages.json": [
+      "relaykit/dto/claude.go:ClaudeResponse",
+      "relaykit/dto/claude.go:ClaudeMediaMessage"
+    ],
+    "llm_messages.sse": [
+      "relay/channel/claude/relay-claude.go:HandleStreamResponseData",
+      "relay/helper/common.go:ClaudeChunkData"
+    ],
+    "llm_responses.json": [
+      "relaykit/dto/openai_response.go:OpenAIResponsesResponse",
+      "relaykit/dto/openai_response.go:ResponsesOutput"
+    ],
+    "llm_responses.sse": [
+      "relaykit/dto/openai_response.go:ResponsesStreamResponse",
+      "service/responses_usage.go:terminal stream variants"
+    ]
+  }
+}

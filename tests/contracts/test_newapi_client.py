@@ -241,3 +241,86 @@ class ClientContract(unittest.TestCase):
                 if path.stat().st_size != 480:
                     raise ValueError('Expected 240 mono 16-bit PCM samples')
             self.assertEqual(client.write_binary(response(),path,kind='pcm',validator=validate_frames),str(path))
+
+    def test_credential_values_are_redacted_even_when_echoed_as_native_dictionary_keys(self):
+        from tools._newapi.client import redact
+        data = {'test-secret':{'token':'semantic-token','echo':'test-secret'}}
+        self.assertEqual(redact(data,'test-secret',drop_credentials=False), {'[redacted]':{'token':'semantic-token','echo':'[redacted]'}})
+
+    def test_explicit_task_receipts_keep_a_failed_public_id_without_weakening_errors(self):
+        from unittest.mock import Mock
+        from tools._newapi.client import NewAPIClient,NewAPIError
+        settings = NewAPISettings(NewAPIConfig(base_url='https://receipt.example'), 'test-secret')
+        session = Mock()
+        client = NewAPIClient(settings,session)
+        def response(payload,status=200):
+            value = requests.Response()
+            value.status_code,value._content = status,json.dumps(payload).encode()
+            return value
+        failed = {'id':'task-failed','object':'video','status':'failed','error':{'code':'vendor_rejected','message':'rejected'}}
+        session.request.return_value = response(failed)
+        self.assertEqual(client.request_json('POST','/v1/videos',receipt=True),failed)
+        self.assertEqual(session.request.call_count,1)
+        for path,payload,status,receipt in [('/v1/videos',failed,200,False),('/v1/videos',{'error':{'message':'denied'}},200,True),('/v1/videos',failed,500,True),('/v1/responses',failed,200,True)]:
+            session.request.return_value = response(payload,status)
+            with self.assertRaises(NewAPIError):
+                client.request_json('POST',path,receipt=receipt)
+
+    def test_prepared_requests_ignore_netrc_for_gateway_and_cdn_without_disabling_proxy(self):
+        import io
+        import tempfile
+        from pathlib import Path
+        from PIL import Image
+        from unittest.mock import patch
+        from tools._newapi.client import NewAPIClient
+        class AuthenticationHandler(BaseHTTPRequestHandler):
+            seen = []
+            def log_message(self,*args):
+                pass
+            def do_GET(self):
+                type(self).seen.append(self.headers.get('Authorization'))
+                body = b'{"data":[]}'
+                self.send_response(200)
+                self.send_header('Content-Length',str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+        server = ThreadingHTTPServer(('127.0.0.1',0),AuthenticationHandler)
+        thread = threading.Thread(target=server.serve_forever,daemon=True)
+        thread.start()
+        client = NewAPIClient(NewAPISettings(NewAPIConfig(base_url=f'http://127.0.0.1:{server.server_port}'),'test-secret'))
+        try:
+            with patch('requests.sessions.get_netrc_auth',return_value=('netrc-user','test-secret')):
+                self.assertEqual(client.request_json('GET','/v1/models'),{'data':[]})
+            self.assertEqual(AuthenticationHandler.seen,['Bearer test-secret'])
+            self.assertTrue(client.session.trust_env)
+        finally:
+            server.shutdown()
+            server.server_close()
+        buffer = io.BytesIO()
+        Image.new('RGB',(2,2),'red').save(buffer,format='PNG')
+        headers = []
+        def send(session,request,**kwargs):
+            headers.append(dict(request.headers))
+            self.assertTrue(session.trust_env)
+            value = requests.Response()
+            value.status_code,value._content,value._content_consumed = 200,buffer.getvalue(),True
+            value.headers['Content-Type'] = 'image/png'
+            return value
+        with tempfile.TemporaryDirectory() as directory,patch('requests.sessions.get_netrc_auth',return_value=('netrc-user','test-secret')),patch('requests.Session.send',new=send):
+            client.download_media('https://cdn.example/image.png',Path(directory)/'image.png')
+        self.assertNotIn('Authorization',headers[0])
+
+    def test_interrupted_json_error_body_does_not_hide_unknown_paid_outcome(self):
+        from unittest.mock import Mock
+        from tools._newapi.client import NewAPIClient,NewAPIError
+        response = Mock(spec=requests.Response)
+        response.status_code = 200
+        response.headers = {'Content-Type':'application/json'}
+        response.json.side_effect = requests.exceptions.ChunkedEncodingError('connection lost')
+        session = Mock()
+        session.request.return_value = response
+        client = NewAPIClient(NewAPISettings(NewAPIConfig(base_url='https://json-interruption.example'),'test-secret'),session)
+        with self.assertRaises(NewAPIError) as raised:
+            client.request('POST','/v1/audio/speech',stream=True)
+        self.assertTrue(raised.exception.outcome_unknown)
+        self.assertEqual(session.request.call_count,1)

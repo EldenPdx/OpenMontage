@@ -1,0 +1,24 @@
+event: response.created
+data: {"type": "response.created", "response": {"id": "resp-fixture", "model": "deployment-text", "status": "in_progress", "output": []}}
+
+event: response.output_item.added
+data: {"type": "response.output_item.added", "output_index": 0, "item": {"type": "reasoning", "id": "rs-fixture", "summary": [{"type": "summary_text", "text": "native summary"}]}}
+
+event: response.output_item.done
+data: {"type": "response.output_item.done", "output_index": 0, "item": {"type": "reasoning", "id": "rs-fixture", "summary": [{"type": "summary_text", "text": "native summary"}]}}
+
+event: response.output_item.added
+data: {"type": "response.output_item.added", "output_index": 1, "item": {"type": "message", "id": "m-fixture", "role": "assistant", "content": [{"type": "output_text", "text": "Rain "}, {"type": "output_text", "text": "scene"}]}}
+
+event: response.output_item.done
+data: {"type": "response.output_item.done", "output_index": 1, "item": {"type": "message", "id": "m-fixture", "role": "assistant", "content": [{"type": "output_text", "text": "Rain "}, {"type": "output_text", "text": "scene"}]}}
+
+event: response.output_item.added
+data: {"type": "response.output_item.added", "output_index": 2, "item": {"type": "function_call", "id": "fc-fixture", "call_id": "call-fixture", "name": "plan", "arguments": "{\"scene\":1}"}}
+
+event: response.output_item.done
+data: {"type": "response.output_item.done", "output_index": 2, "item": {"type": "function_call", "id": "fc-fixture", "call_id": "call-fixture", "name": "plan", "arguments": "{\"scene\":1}"}}
+
+event: response.completed
+data: {"type": "response.completed", "response": {"id": "resp-fixture", "object": "response", "model": "deployment-text", "status": "completed", "output": [{"type": "reasoning", "id": "rs-fixture", "summary": [{"type": "summary_text", "text": "native summary"}]}, {"type": "message", "id": "m-fixture", "role": "assistant", "content": [{"type": "output_text", "text": "Rain "}, {"type": "output_text", "text": "scene"}]}, {"type": "function_call", "id": "fc-fixture", "call_id": "call-fixture", "name": "plan", "arguments": "{\"scene\":1}"}], "usage": {"input_tokens": 10, "output_tokens": 12}}}
+
