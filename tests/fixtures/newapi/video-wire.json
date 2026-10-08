@@ -1,0 +1,34 @@
+{
+  "provenance": {
+    "repository": "xvanai-new",
+    "commit": "00e4e91602df6b3c3c1f39d05e2ae704ad3f6d6a",
+    "sources": [
+      "relaykit/dto/openai_video.go:28-71",
+      "plugins/tasks/sora/plugin.js:316-369",
+      "pkg/jsplugin/routing.go:97",
+      "controller/relay.go:758-815",
+      "controller/video_proxy.go:62-137"
+    ],
+    "kind": "hand-constructed contract examples; not captured live traffic",
+    "media": "Tests generate a 64x48 0.3-second H.264 MP4 locally with FFmpeg."
+  },
+  "non_sora_profile": {
+    "capabilities": ["video_generation"],
+    "operations": ["text_to_video"],
+    "supports_async": true,
+    "supported_parameters": ["prompt", "duration", "ratio", "resolution", "generate_audio"],
+    "parameter_map": {"duration": "duration", "aspect_ratio": "ratio"},
+    "defaults": {"resolution": "720p", "generate_audio": true},
+    "limits": {"duration": {"type": "integer", "minimum": 1, "maximum": 15}}
+  },
+  "non_sora_request": {
+    "model": "independent-video",
+    "prompt": "A blue room",
+    "duration": 5,
+    "ratio": "16:9",
+    "resolution": "720p",
+    "generate_audio": false
+  },
+  "receipt": {"id": "video-public", "object": "video", "status": "queued", "progress": 0},
+  "completed": {"id": "video-public", "object": "video", "status": "completed", "progress": 100}
+}
