@@ -31,3 +31,11 @@ paths:
   styles_dir: styles
   skills_dir: skills
   output_dir: output
+
+# Optional New API gateway. Deployment administrators fill non-secret profiles;
+# users supply only NEW_API_KEY in their environment or .env.
+# See tests/fixtures/newapi/deployment.yaml for a complete synthetic example.
+newapi:
+  base_url: ""
+  default_models: {}
+  models: {}

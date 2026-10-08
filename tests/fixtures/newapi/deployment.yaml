@@ -1,0 +1,50 @@
+# Synthetic deployment profile; model IDs are placeholders, not vendor guarantees.
+llm:
+  provider: newapi
+  temperature: 0.7
+  max_tokens: 1024
+newapi:
+  base_url: https://gateway.example/deployment
+  default_llm_protocol: responses
+  default_models:
+    text_generation: deployment-text
+    image_generation: deployment-image
+    video_generation: deployment-video
+    tts: deployment-speech
+  models:
+    deployment-text:
+      capabilities: [text_generation]
+      protocols: [anthropic, responses]
+      operations: [messages, responses]
+      supported_parameters: [temperature, max_tokens, max_output_tokens, tools, tool_choice, reasoning, text, top_p, stop_sequences, parallel_tool_calls, metadata]
+      limits:
+        temperature: {type: number, minimum: 0, maximum: 1}
+    deployment-image:
+      capabilities: [image_generation]
+      operations: [generate, edit, async, async_edit]
+      supports_async: true
+      supported_parameters: [prompt, n, size, quality, response_format, image, images, 'image[]', mask]
+      defaults: {n: 1, size: 1024x1024}
+      parameter_map: {json_image: image, json_images: images, multipart_image: 'image[]', multipart_mask: mask}
+      limits:
+        n: {type: integer, minimum: 1, maximum: 2}
+        images: {type: array, maxItems: 2, items: {type: string}}
+    deployment-video:
+      capabilities: [video_generation]
+      operations: [text_to_video, image_to_video]
+      supports_sync: false
+      supports_async: true
+      supported_parameters: [prompt, seconds, size, input_reference]
+      defaults: {seconds: 4, size: 1280x720}
+      parameter_map: {duration: seconds, reference_image: input_reference}
+      limits:
+        seconds: {enum: [4, 8, 12]}
+        size: {enum: [1280x720, 720x1280]}
+    deployment-speech:
+      capabilities: [tts]
+      operations: [speech]
+      supported_parameters: [input, voice, instructions, response_format, speed]
+      defaults: {voice: alloy, response_format: mp3, speed: 1}
+      limits:
+        response_format: {enum: [mp3, wav, flac, opus, aac]}
+        speed: {type: number, minimum: 0.25, maximum: 4}
