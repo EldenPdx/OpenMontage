@@ -154,13 +154,15 @@ def test_pcm_needs_sampling_facts_before_billing(gateway):
     assert gateway["requests"] == []
 
 
-def test_pcm_duration_uses_declared_sampling_facts(gateway):
+@pytest.mark.parametrize("prefix", [b"\0\0", b"{\0", b"[\0", b"RIFF", b"ID3!"])
+def test_pcm_duration_uses_declared_sampling_facts(gateway, prefix):
     from tools.audio.newapi_tts import NewAPITTS
 
     profile = gateway["deployment"]["newapi"]["models"]["deployment-speech"]
     profile["limits"]["response_format"].update(enum=["pcm"], **{"x-pcm": {"sample_rate": 8000, "channels": 1, "sample_width": 2}})
+    profile["defaults"]["response_format"] = "pcm"
     gateway["config_path"].write_text(yaml.safe_dump(gateway["deployment"]))
-    gateway.update(body=b"\0\0" * 1600, mime="application/octet-stream")
+    gateway.update(body=prefix + b"\0" * (3200 - len(prefix)), mime="application/octet-stream")
     output = gateway["output"].with_suffix(".pcm")
     result = NewAPITTS(config_path=gateway["config_path"]).execute({"text": "Hello.", "format": "pcm", "output_path": str(output)})
 
@@ -305,3 +307,21 @@ def test_provider_parameters_cannot_enable_speech_sse(gateway):
     })
 
     assert not result.success and gateway["requests"] == []
+
+
+@pytest.mark.parametrize("cut", ["half", "last-ten-bytes"])
+def test_truncated_mp3_seek_frame_count_preserves_previous_asset(gateway, tmp_path, cut):
+    from tools.audio.newapi_tts import NewAPITTS
+
+    source = tmp_path / "one-second.mp3"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-y", str(source)], check=True)
+    encoded = source.read_bytes()
+    gateway.update(body=encoded[:len(encoded) // 2] if cut == "half" else encoded[:-10], mime="audio/mpeg")
+    target = gateway["output"].with_suffix(".mp3")
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"previous-valid-asset")
+    result = NewAPITTS(config_path=gateway["config_path"]).execute({"text": "Hello.", "format": "mp3", "output_path": str(target)})
+
+    assert not result.success
+    assert target.read_bytes() == b"previous-valid-asset"
+    assert len(gateway["requests"]) == 1

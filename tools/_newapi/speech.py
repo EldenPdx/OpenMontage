@@ -1,6 +1,8 @@
 """New API binary speech protocol; independent of the OpenAI SDK."""
 
 from pathlib import Path
+import json
+import subprocess
 
 from tools._newapi.client import NewAPIClient, NewAPIError
 from tools._newapi.models import merge_params, resolve_model
@@ -27,13 +29,57 @@ def _validate_audio(path, fmt):
         raise ValueError("Gateway audio does not match the requested format")
     if fmt == "opus" and audio.get("codec") != "opus":
         raise ValueError("Gateway audio is not Opus")
+    if fmt == "mp3":
+        _validate_mp3_frames(path)
+
+
+def _validate_mp3_frames(path):
+    with path.open("rb") as file:
+        tag = file.read(10)
+        start = 0
+        if tag[:3] == b"ID3":
+            start = 10 + sum((byte & 127) << shift for byte, shift in zip(tag[6:10], (21, 14, 7, 0)))
+            if tag[3] == 4 and tag[5] & 16:
+                start += 10
+        file.seek(start)
+        header = file.read(4)
+        if len(header) != 4 or header[0] != 255 or header[1] & 224 != 224 or (header[1] >> 1) & 3 != 1:
+            return
+        version, mono = (header[1] >> 3) & 3, header[3] >> 6 == 3
+        if version == 1:
+            return
+        side = (17 if mono else 32) if version == 3 else (9 if mono else 17)
+        file.seek(start + 4 + (0 if header[1] & 1 else 2) + side)
+        seek = file.read(16)
+    # ponytail: Headerless MP3 has no expected length; require trusted duration metadata if a gateway needs completeness beyond transport/frame validity.
+    if len(seek) < 8 or seek[:4] not in {b"Info", b"Xing"}:
+        return
+    flags = int.from_bytes(seek[4:8], "big")
+    expected = int.from_bytes(seek[8:12], "big") if flags & 1 else None
+    byte_offset = 12 if flags & 1 else 8
+    if flags & 2 and (len(seek) < byte_offset + 4 or path.stat().st_size - start < int.from_bytes(seek[byte_offset:byte_offset + 4], "big")):
+        raise NewAPIError("invalid_media", "Gateway MP3 is shorter than its declared stream size")
+    if expected is None:
+        return
+    probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a:0", "-count_packets", "-show_entries", "stream=nb_read_packets", "-of", "json", str(path)], capture_output=True, text=True, timeout=15)
+    try:
+        actual = int(json.loads(probe.stdout)["streams"][0]["nb_read_packets"])
+    except (ValueError, KeyError, IndexError):
+        raise NewAPIError("invalid_media", "MP3 frame count could not be verified") from None
+    if probe.returncode or actual != expected:
+        raise NewAPIError("invalid_media", "Gateway MP3 is truncated or has an invalid seek frame count")
 
 
 def _validate_pcm(path, pcm):
     with path.open("rb") as file:
-        prefix = file.read(16)
-    if prefix.startswith((b"RIFF", b"ID3", b"OggS", b"fLaC")) or prefix.lstrip().startswith((b"{", b"[")):
-        raise ValueError("Gateway returned a container or error instead of raw PCM")
+        prefix = file.read(65536)
+    if prefix.lstrip().startswith(b"{"):
+        try:
+            payload = json.loads(prefix)
+        except ValueError:
+            payload = None
+        if isinstance(payload, dict) and (payload.get("error") or payload.get("success") is False or payload.get("type") == "error"):
+            raise ValueError("Gateway returned a JSON error instead of raw PCM")
     if path.stat().st_size % (pcm["channels"] * pcm["sample_width"]):
         raise ValueError("Gateway PCM has a truncated sample frame")
 
@@ -85,7 +131,8 @@ def synthesize(settings, inputs):
     response = client.request("POST", "/v1/audio/speech", json=payload, stream=True)
     request_id = response.headers.get("x-request-id")
     mime = response.headers.get("Content-Type", "").split(";")[0].lower()
-    if not (mime.startswith("audio/") or mime in {"application/octet-stream", "application/ogg"}):
+    raw_pcm_mime = {"application/octet-stream", "audio/pcm", "audio/l16", "audio/l24", "audio/x-pcm", "audio/raw", "audio/x-raw"}
+    if not (mime.startswith("audio/") or mime in {"application/octet-stream", "application/ogg"}) or fmt == "pcm" and mime not in raw_pcm_mime:
         response.close()
         raise NewAPIError("invalid_media", "Gateway speech did not return an audio content type", request_id=request_id)
     validator = (lambda path: _validate_pcm(path, pcm)) if fmt == "pcm" else (lambda path: _validate_audio(path, fmt))
