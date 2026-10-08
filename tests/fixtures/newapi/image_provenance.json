@@ -1,0 +1,22 @@
+{
+  "construction": "hand_constructed_from_audited_source",
+  "upstream_sha": "00e4e91602df6b3c3c1f39d05e2ae704ad3f6d6a",
+  "openmontage_baseline_sha": "9327439db69021ab4b0e2776729bf3b58fdb5a87",
+  "source_files": [
+    "relaykit/dto/openai_image.go",
+    "relay/helper/valid_request.go",
+    "controller/async_image.go",
+    "controller/task.go"
+  ],
+  "source_symbols": [
+    "ImageRequest",
+    "GetAndValidOpenAIImageRequest",
+    "asyncImageTaskJSON",
+    "asyncImagePublicStatus",
+    "GetTask"
+  ],
+  "media": {
+    "image_sample.png": "Locally generated Pillow RGB PNG, 3x2 pixels, solid (24,84,128); no external traffic or private media."
+  },
+  "wire": "image_result.json is synthetic OpenAI-style image JSON; timestamps, prompt, usage and alias model/task IDs in tests are synthetic."
+}

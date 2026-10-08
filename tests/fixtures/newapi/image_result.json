@@ -1,0 +1,12 @@
+{
+  "created": 1700000000,
+  "data": [
+    {
+      "b64_json": "iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAIAAAASFvFNAAAAFElEQVR4nGOUCGlgAAMmCMXAwAAAEGwA8GJCT9cAAAAASUVORK5CYII=",
+      "revised_prompt": "A quiet rain scene."
+    }
+  ],
+  "usage": {
+    "output_tokens": 12
+  }
+}
