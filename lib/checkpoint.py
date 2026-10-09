@@ -7,6 +7,10 @@ checkpoints to resume pipelines and to present state at human checkpoints.
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
+from contextvars import ContextVar
+import os
+import threading
 from functools import lru_cache
 from datetime import datetime, timezone
 from pathlib import Path
@@ -93,6 +97,98 @@ HISTORY_DIRNAME = "history"
 
 class CheckpointValidationError(ValueError):
     """Raised when a checkpoint or its canonical artifacts are invalid."""
+
+
+_STUDIO_WRITE_AUTHORITY = ContextVar("studio_checkpoint_authority", default=None)
+_STUDIO_LEASES = {}
+_STUDIO_LEASE_LOCK = threading.RLock()
+
+
+class StudioProjectLease:
+    """POSIX advisory lock held until all managed project writers have exited."""
+
+    def __init__(self, project_dir, owner):
+        self.project_dir = Path(project_dir).resolve()
+        self.owner = owner
+        self.acquired = False
+
+    def acquire(self):
+        import fcntl
+        with _STUDIO_LEASE_LOCK:
+            existing = _STUDIO_LEASES.get(self.project_dir)
+            if existing:
+                if existing["owner"] != self.owner:
+                    raise CheckpointValidationError("Another Studio writer owns this project")
+                existing["count"] += 1
+            else:
+                self.project_dir.mkdir(parents=True, exist_ok=True)
+                descriptor = os.open(self.project_dir / ".studio-writer.lock", os.O_RDWR | os.O_CREAT, 0o600)
+                try:
+                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError:
+                    os.close(descriptor)
+                    raise CheckpointValidationError("Another process owns the Studio project writer lock") from None
+                _STUDIO_LEASES[self.project_dir] = {"owner": self.owner, "count": 1, "fd": descriptor}
+            self.acquired = True
+        return self
+
+    def close(self):
+        with _STUDIO_LEASE_LOCK:
+            if self.acquired:
+                existing = _STUDIO_LEASES[self.project_dir]
+                existing["count"] -= 1
+                if existing["count"] == 0:
+                    os.close(existing["fd"])
+                    del _STUDIO_LEASES[self.project_dir]
+                self.acquired = False
+
+    def __enter__(self):
+        return self.acquire()
+
+    def __exit__(self, *args):
+        self.close()
+
+
+@contextmanager
+def studio_checkpoint_authority(authorize):
+    """Trusted backend supplies a live PostgreSQL fence check for managed writes."""
+    token = _STUDIO_WRITE_AUTHORITY.set(authorize)
+    try:
+        authorize()
+        yield
+    finally:
+        _STUDIO_WRITE_AUTHORITY.reset(token)
+
+
+def _check_studio_writer(pipeline_dir, project_id):
+    if (pipeline_dir / project_id / ".studio-owner.json").exists():
+        authorize = _STUDIO_WRITE_AUTHORITY.get()
+        if authorize is None:
+            raise CheckpointValidationError("Studio owns this project; use its current worker and approval API")
+        authorize()
+
+
+def check_studio_tool_writer(inputs):
+    """Inspect actual tool path ancestors, including non-default project roots."""
+    if isinstance(inputs, dict):
+        for value in inputs.values():
+            check_studio_tool_writer(value)
+    elif isinstance(inputs, (list, tuple)):
+        for value in inputs:
+            check_studio_tool_writer(value)
+    elif isinstance(inputs, (str, Path)) and str(inputs) and "\x00" not in str(inputs):
+        try:
+            candidate = Path(inputs).expanduser().absolute()
+        except (RuntimeError, OSError, ValueError):
+            return
+        for project in (candidate, *candidate.parents):
+            try:
+                owned = (project / ".studio-owner.json").is_file()
+            except OSError:
+                continue
+            if owned:
+                _check_studio_writer(project.parent, project.name)
+                break
 
 
 def _validate_style_playbook(style_playbook: str | None) -> None:
@@ -214,6 +310,7 @@ def init_project(
     """
     _validate_style_playbook(style_playbook)
     base = pipeline_dir or PROJECTS_DIR
+    _check_studio_writer(base, project_id)
     project_dir = base / project_id
     for sub in (
         "artifacts",
@@ -435,8 +532,10 @@ def write_checkpoint(
     cost_snapshot: Optional[dict] = None,
     error: Optional[str] = None,
     metadata: Optional[dict] = None,
+    _writer=None,
 ) -> Path:
     """Write a checkpoint file for a pipeline stage."""
+    _check_studio_writer(pipeline_dir, project_id)
     # Backfill identity fields from the project marker so omitted kwargs
     # cannot bypass either gate enforcement or style validation.
     marker = None
@@ -547,6 +646,9 @@ def write_checkpoint(
     validate_checkpoint(checkpoint)
 
     path = _checkpoint_path(pipeline_dir, project_id, stage)
+    if _writer is not None:
+        _writer(path, checkpoint)
+        return path
     path.parent.mkdir(parents=True, exist_ok=True)
     # Serialize to a temp file first so a mid-write failure (disk full,
     # unserializable metadata) can never leave the stage with a truncated

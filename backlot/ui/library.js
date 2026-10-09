@@ -82,6 +82,7 @@ async function render() {
   document.getElementById("liveText").textContent = liveCount ? `${liveCount} LIVE` : "IDLE";
   grid.innerHTML = "";
   document.getElementById("empty").style.display = projects.length ? "none" : "block";
+  document.getElementById("empty").textContent = "No projects yet — create a task in Production Studio or run a production with the CLI.";
   for (const p of projects) grid.append(card(p));
 }
 

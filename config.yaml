@@ -39,3 +39,27 @@ newapi:
   base_url: ""
   default_models: {}
   models: {}
+
+# Browser Agent control plane; execution is opt-in for local single-user use.
+studio:
+  enabled: false
+  default_profile: xvan
+  concurrency: 1
+  profiles:
+    xvan:
+      provider: xvan
+      base_url: https://xvan.ai/v1
+      api: openai-responses
+      model: gpt-5.6-sol
+      credential_env: NEW_API_KEY
+      input: [text, image]
+      context_window: 200000
+      max_output_tokens: 16384
+      reasoning: true
+      thinking_level: medium
+      max_turns: 100
+      max_retries: 0
+      price: null
+  media_models:
+    image: Images2.5-Flare
+    video: dreamina-seedance-2-5-260628

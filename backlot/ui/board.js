@@ -1,3 +1,4 @@
+import { studioConfig, studioAction, subscribeTask, stateLabel, moneyMicros, costLabel, localURL } from "/ui/studio.js";
 // Backlot project board — renders BoardState and stays live via SSE.
 
 import {
@@ -18,6 +19,12 @@ let state = null;
 let selectedStage = null;   // stage drawer open for this stage name
 let activeRender = 0;
 let replay = null;          // {t0, t1, t, playing} — replay mode when non-null
+let studioTask = null;
+let studioStream = null;
+let studioBusy = false;
+let studioAvailable = true;
+let studioMessage = "";
+const studioDrafts = new Map();
 let firstPaint = true;
 
 function applyTheme(theme) {
@@ -74,19 +81,27 @@ function renderSlate(s) {
   }
 
   const cost = el("div", { class: "cost" });
-  if (s.cost) {
-    const spent = s.cost.total_spent_usd ?? 0;
-    const budget = spent + (s.cost.budget_remaining_usd ?? 0);
-    const hasBudget = s.cost.budget_remaining_usd != null;
+  const currentCost = !replay && studioTask?.cost;
+  const snapshot = currentCost ? {
+    total_spent_usd: currentCost.spent_usd_micros / 1_000_000,
+    total_reserved_usd: currentCost.reserved_usd_micros / 1_000_000,
+    budget_remaining_usd: (currentCost.budget_usd_micros - currentCost.spent_usd_micros - currentCost.reserved_usd_micros) / 1_000_000,
+    price_status: currentCost.price_status, unknown_call_count: currentCost.unknown_call_count,
+  } : s.cost;
+  if (snapshot) {
+    const unquoted = snapshot.price_status === "unquoted" || snapshot.unknown_call_count > 0;
+    const spent = snapshot.total_spent_usd ?? 0;
+    const budget = spent + (snapshot.total_reserved_usd ?? 0) + (snapshot.budget_remaining_usd ?? 0);
+    const hasBudget = snapshot.budget_remaining_usd != null;
     const pct = hasBudget && budget > 0 ? Math.min(100, (spent / budget) * 100) : 0;
-    cost.append(el("div", { class: "nums" }, el("b", {}, fmtMoney(spent)),
+    cost.append(el("div", { class: "nums" }, el("b", {}, unquoted ? "Unquoted" : fmtMoney(spent)),
       hasBudget ? el("span", {}, ` / ${fmtMoney(budget)}`) : ""));
     if (hasBudget) {
       cost.append(el("div", { class: "bar" }, el("i", {
         class: pct > 90 ? "crit" : pct > 75 ? "warn" : "", style: `width:${pct}%`,
       })));
     }
-    cost.append(el("div", { class: "label" }, "generation spend"));
+    cost.append(el("div", { class: "label" }, unquoted ? "unquoted generation cost" : "generation spend"));
   }
 
   return el("header", { class: "slate" },
@@ -108,7 +123,7 @@ function renderSlate(s) {
 // ---------------------------------------------------------------------------
 
 function stageSub(st) {
-  if (st.status === "awaiting_human") return "awaiting your approval\nreply in chat to continue";
+  if (st.status === "awaiting_human") return studioTask ? "awaiting your approval\nreview in this browser" : "awaiting your approval\nreply in chat to continue";
   if (st.status === "in_progress" && st.stalled) {
     return `stalled? no activity for ${st.stalled_minutes}m\nask the agent for status`;
   }
@@ -511,7 +526,7 @@ function renderApprovalReview(s) {
       el("div", {},
         el("div", { class: "approval-eyebrow" }, "REVIEW GATE"),
         el("h2", {}, `${humanize(awaiting.name)} is ready for your review`),
-        el("p", {}, "Review the artifact here, then reply in chat to approve it or request changes."),
+        el("p", {}, studioTask ? "Review the artifact here, then use the browser controls below to approve this version or request changes." : "Review the artifact here, then reply in chat to approve it or request changes."),
       ),
       el("span", { class: "approval-status" }, "PENDING APPROVAL"),
     ),
@@ -884,7 +899,7 @@ function renderAwaitingNotice(s) {
     el("span", { style: "font-size:calc(16px * var(--fs-scale))" }, "◈"),
     el("span", {},
       el("b", {}, `The ${awaiting.name} stage is waiting for your review. `),
-      "The agent is paused at this gate — reply ", el("b", {}, "in chat"), " to approve or request changes."));
+      studioTask ? "Use the browser controls below to approve this exact version or request changes." : "The agent is paused at this gate — reply in chat to approve or request changes."));
 }
 
 // ---------------------------------------------------------------------------
@@ -1057,8 +1072,12 @@ function render() {
   document.title = `Backlot — ${s.title}`;
   document.body.classList.toggle("first", firstPaint);
   firstPaint = false;
+  const focused = document.activeElement;
+  const focusId = focused?.closest("#studio-controls") ? focused.id : null;
+  const selection = focusId === "revision-comment" ? [focused.selectionStart, focused.selectionEnd] : null;
   app.innerHTML = "";
   app.append(renderSlate(s));
+  const controls = renderStudioControls();
   app.append(renderRail(s));
   const replayBar = renderReplayBar(state);
   if (replayBar) app.append(replayBar);
@@ -1086,16 +1105,22 @@ function render() {
   const found = renderFoundMedia(s);
   const renders = renderRenders(s);
 
-  if (approvalReview || script || decisions || activity) {
+  if (approvalReview || script || decisions || activity || controls) {
     for (const section of [storyboard, found, renders]) {
       if (section) main.append(section);
     }
+    if (controls) main.append(controls);
     const hasAside = Boolean(decisions || activity);
     app.append(el("div", { class: `board${hasAside ? "" : " solo"}` }, main, hasAside ? aside : null));
   } else {
     for (const section of [storyboard, found, renders]) {
       if (section) app.append(section);
     }
+  }
+  if (focusId) {
+    const replacement = document.getElementById(focusId);
+    replacement?.focus();
+    if (selection && replacement) replacement.setSelectionRange(...selection);
   }
 }
 
@@ -1125,9 +1150,19 @@ function normalize(s) {
   return s;
 }
 
+let refreshPending;
 async function refresh() {
-  state = normalize(await getJSON(`/api/project/${encodeURIComponent(projectId)}/state`));
-  render();
+  if (refreshPending) return refreshPending;
+  refreshPending = (async () => {
+    await refreshStudio();
+    try { state = normalize(await getJSON(`/api/project/${encodeURIComponent(projectId)}/state`)); }
+    catch (error) {
+      if (!studioTask) throw error;
+      state = normalize({project_id: projectId, title: studioTask.request.brief, has_pipeline_state: false});
+    }
+    render();
+  })().finally(() => { refreshPending = null; });
+  return refreshPending;
 }
 
 refresh().catch((err) => {
@@ -1139,4 +1174,145 @@ refresh().catch((err) => {
 // ?static=1 disables the live feed (screenshots, static exports).
 if (!new URLSearchParams(location.search).has("static")) {
   subscribe(`/api/project/${encodeURIComponent(projectId)}/events`, () => refresh().catch(console.error));
+}
+
+window.addEventListener("pagehide", () => studioStream?.close());
+
+async function refreshStudio() {
+  if (new URLSearchParams(location.search).has("static")) return;
+  try {
+    const config = await studioConfig();
+    studioAvailable = config.ready;
+    if (!config.ready) return;
+    let taskId = studioTask?.task_id || new URLSearchParams(location.search).get("task");
+    if (taskId) {
+      const task = await getJSON(`/api/studio/tasks/${encodeURIComponent(taskId)}`);
+      studioTask = task.project_id === projectId ? task : null;
+    } else {
+      let after;
+      do {
+        const tasks = await getJSON(`/api/studio/tasks?limit=100${after ? `&after=${encodeURIComponent(after)}` : ""}`);
+        studioTask = tasks.find((task) => task.project_id === projectId) || null;
+        after = tasks.length === 100 ? tasks[tasks.length - 1].task_id : null;
+      } while (!studioTask && after);
+    }
+    if (studioTask && (!studioStream || (studioStream.readyState === EventSource.CLOSED && !["cancelled", "failed", "succeeded"].includes(studioTask.state)))) {
+      studioStream = subscribeTask(studioTask.task_id, () => refresh().catch(console.error));
+    }
+    if (studioTask && ["cancelled", "failed", "succeeded"].includes(studioTask.state)) studioStream?.close();
+  } catch {
+    studioAvailable = false;
+    if (studioTask) studioMessage = "The task service is unavailable. Reconnect before changing the task.";
+  }
+}
+
+async function sendStudioAction(kind, task, gate, draft) {
+  if (studioBusy) return;
+  let body = { expected_version: task.version }, path = `/api/studio/tasks/${task.task_id}/${kind}`;
+  if (gate) {
+    let comment = draft.comment;
+    if (kind === "revise" && !comment.trim() && draft.options.length) {
+      const labels = gate.options.filter((option) => draft.options.includes(option.option_id)).map((option) => option.label);
+      comment = `Revise the production plan and approval scope to use: ${labels.join(", ")}.`;
+    }
+    if (kind === "revise" && !comment.trim()) {
+      studioMessage = "Describe the changes before requesting a revision."; render();
+      document.getElementById("revision-comment")?.focus(); return;
+    }
+    path = `/api/studio/tasks/${task.task_id}/approvals/${gate.binding.gate_id}/decision`;
+    body = { ...body, binding: gate.binding, decision: kind, comment, selected_option_ids: draft.options };
+  }
+  studioBusy = true; studioMessage = "Saving your request…"; render();
+  try {
+    studioTask = await studioAction(path, body);
+    studioMessage = kind === "cancel" || kind === "abort"
+      ? "Cancellation requested. Submitted remote work may still complete and charge."
+      : "Your request was recorded. The current task state is shown below.";
+  } catch (error) {
+    studioMessage = error.status === 409
+      ? "This version changed. The current gate has been refreshed; review it before approving again."
+      : error.message;
+  } finally {
+    studioBusy = false; await refresh();
+  }
+}
+
+function renderStudioControls() {
+  if (!studioTask) return null;
+  const task = studioTask;
+  const panel = el("section", { class: "studio-controls", id: "studio-controls", "data-task-id": task.task_id,
+    "data-task-version": task.version, "aria-busy": String(studioBusy), "aria-labelledby": "studio-control-heading" },
+    el("span", { class: "chip" }, "BROWSER PRODUCTION"),
+    el("h2", { id: "studio-control-heading" }, stateLabel(task.state)),
+    el("p", { class: "studio-meta" }, `${task.task_id} · ${task.config_snapshot.provider} / ${task.config_snapshot.model} · version ${task.version}`),
+    el("p", { class: "studio-meta" }, costLabel(task)),
+    el("a", { href: `/studio?task=${encodeURIComponent(task.task_id)}` }, "View task in Studio"));
+  if (replay) { panel.append(el("p", {}, "You are viewing history. Return to Live to change this task.")); return panel; }
+  if (studioMessage) panel.append(el("p", { id: "studio-control-status", role: "status", "aria-live": "polite" }, studioMessage));
+  if (task.error) panel.append(el("p", { class: "studio-error", role: "alert" }, task.error.message));
+  function button(id, label, action, primary = false) {
+    const node = el("button", { id, type: "button", class: primary ? "primary" : "", onclick: action }, label);
+    node.disabled = studioBusy || !studioAvailable; return node;
+  }
+  const gate = task.state === "awaiting_approval" && task.approval?.status === "pending" ? task.approval : null;
+  if (gate) {
+    const key = `${gate.binding.gate_id}:${gate.binding.artifact_sha256}:${gate.binding.scope_sha256}`;
+    const draft = studioDrafts.get(key) || { comment: "", options: [] };
+    studioDrafts.set(key, draft);
+    panel.setAttribute("data-gate-id", gate.binding.gate_id);
+    panel.append(el("h2", {}, `${stateLabel(gate.stage)} review`),
+      el("p", { class: "studio-summary" }, gate.summary),
+      el("p", { class: "studio-meta" }, `Artifact revision ${gate.binding.artifact_revision} · checkpoint revision ${gate.binding.checkpoint_revision}`),
+      el("p", {}, `${gate.scope.provider} / ${gate.scope.model}${gate.scope.render_runtime ? ` · render: ${gate.scope.render_runtime}` : ""} · budget ${moneyMicros(gate.scope.budget_usd_micros)}`));
+    if (gate.scope.unknown_price) panel.append(el("p", {},
+      `The price is unquoted. This approval reserves up to ${moneyMicros(gate.scope.authorized_limit_usd_micros)} as an estimate; it is not a hard limit on the gateway's actual charge.`));
+    panel.append(el("a", { href: mediaURL(projectId, gate.artifact.path), target: "_blank", rel: "noopener" }, "Open the exact review artifact"));
+    if (gate.options?.length) {
+      const choices = el("fieldset", {}, el("legend", {}, "Available choices — changing the displayed scope requests a revision"));
+      for (const option of gate.options) {
+        const input = el("input", { type: "checkbox", value: option.option_id, name: "gate-option", "aria-label": option.label });
+        input.checked = draft.options.includes(option.option_id); input.disabled = studioBusy;
+        input.addEventListener("change", () => {
+          draft.options = [...choices.querySelectorAll("input:checked")].map((item) => item.value);
+          const approve = document.getElementById("approve-gate");
+          const changed = draft.options.some((id) => id !== "keep-current" && id !== gate.scope.render_runtime);
+          if (approve) approve.disabled = studioBusy || !studioAvailable || changed;
+        });
+        choices.append(el("label", { class: "studio-option" }, input,
+          el("span", {}, option.label, option.description ? el("p", {}, option.description) : null)));
+      }
+      panel.append(choices);
+    }
+    const comment = el("textarea", { id: "revision-comment", maxlength: "10000", rows: "3" });
+    comment.value = draft.comment; comment.disabled = studioBusy;
+    comment.addEventListener("input", () => { draft.comment = comment.value; });
+    panel.append(el("label", { for: "revision-comment" }, "Revision feedback (required when requesting changes)"), comment);
+    const approve = button("approve-gate", "Approve this version", () => sendStudioAction("approve", task, gate, draft), true);
+    approve.disabled = studioBusy || !studioAvailable || draft.options.some((id) => id !== "keep-current" && id !== gate.scope.render_runtime);
+    panel.append(el("div", { class: "studio-actions" }, approve,
+      button("revise-gate", "Request revision", () => sendStudioAction("revise", task, gate, draft)),
+      button("reject-gate", "Reject this plan", () => sendStudioAction("reject", task, gate, draft)),
+      button("abort-task", "Stop task", () => sendStudioAction("abort", task, gate, draft))));
+  }
+  if (["blocked", "failed", "recovery_required"].includes(task.state)) {
+    if (Array.isArray(task.pending_calls)) for (const call of task.pending_calls) {
+      panel.append(el("p", { class: "studio-meta" }, `${call.kind || "External call"} · ${call.status}${call.external_job_id ? ` · submitted job ${call.external_job_id}` : ""}`));
+    }
+    const actions = el("div", { class: "studio-actions" });
+    if (task.error?.recovery_actions?.includes("resume")) actions.append(button("resume-task", "Resume after reconciliation", () => sendStudioAction("resume", task)));
+    if (task.error?.recovery_actions?.includes("reconcile")) {
+      panel.append(el("p", {}, "Reconciliation is required before continuing. Unknown paid submissions will not be sent again."));
+      actions.append(button("refresh-recovery", "Refresh reconciliation details", () => refresh()));
+    }
+    panel.append(actions);
+  }
+  if (!["succeeded", "failed", "cancelled", "cancel_requested"].includes(task.state) && !gate) panel.append(
+    el("div", { class: "studio-actions" }, button("cancel-task", "Cancel task", () => sendStudioAction("cancel", task))));
+  if (task.state === "cancel_requested" || task.state === "cancelled") panel.append(el("p", {}, "Local cancellation does not revoke submitted remote jobs or refund their charges."));
+  if (task.state === "succeeded" && task.result?.verified) {
+    panel.append(el("h2", {}, "Verified final video"),
+      el("video", { id: "studio-final-video", controls: "", preload: "metadata", src: localURL(task.result.preview_url) }),
+      el("a", { id: "download-video", href: localURL(task.result.download_url), download: "" }, "Download verified video"));
+  }
+  return panel;
 }

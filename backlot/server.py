@@ -162,8 +162,11 @@ async def _lifespan(app: FastAPI):
             await task
 
 
-def create_app() -> FastAPI:
+def create_app(*, studio_repository=None, studio_config=None, studio_environment=None) -> FastAPI:
     app = FastAPI(title="Backlot", docs_url=None, redoc_url=None, lifespan=_lifespan)
+    from production.api.tasks import mount_studio
+    mount_studio(app, repository=studio_repository, config=studio_config, environment=studio_environment,
+                 projects_dir=PROJECTS_DIR)
 
     # ---- API ----------------------------------------------------------
 
@@ -273,17 +276,24 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=403, detail="path escapes project")
         if not target.is_file():
             raise HTTPException(status_code=404, detail="media not found")
-        return FileResponse(target)
+        headers = {"X-Content-Type-Options": "nosniff"}
+        if target.suffix.lower() in {".html", ".htm", ".svg", ".xhtml"}:
+            headers["Content-Security-Policy"] = "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'"
+        return FileResponse(target, headers=headers)
 
     # ---- UI ------------------------------------------------------------
 
     @app.get("/p/{project_id}")
     async def board_page(project_id: str) -> HTMLResponse:
-        return _ui_html("board.html", ("board.css", "board.js"))
+        return _ui_html("board.html", ("board.css", "board.js", "board-controls.css"))
 
     @app.get("/p/{project_path:path}")
     async def board_page_path(project_path: str) -> HTMLResponse:
-        return _ui_html("board.html", ("board.css", "board.js"))
+        return _ui_html("board.html", ("board.css", "board.js", "board-controls.css"))
+
+    @app.get("/studio")
+    async def studio_page() -> HTMLResponse:
+        return _ui_html("studio.html", ("board.css", "studio.css", "studio.js"))
 
     @app.get("/")
     async def library_page() -> HTMLResponse:
@@ -300,7 +310,7 @@ def create_app() -> FastAPI:
     async def ui_no_cache(request, call_next):
         response = await call_next(request)
         path = request.url.path
-        if path == "/" or path.startswith("/ui") or path.startswith("/p/"):
+        if path in {"/", "/studio"} or path.startswith("/ui") or path.startswith("/p/"):
             response.headers["Cache-Control"] = "no-cache"
         return response
 
@@ -313,6 +323,8 @@ def _safe_project_dir(project_id: str) -> Path:
     if any(c in project_id for c in "/\\:") or project_id in (".", ".."):
         raise HTTPException(status_code=400, detail="invalid project id")
     project_dir = PROJECTS_DIR / project_id
+    if not project_dir.resolve().is_relative_to(PROJECTS_DIR.resolve()):
+        raise HTTPException(status_code=403, detail="project escapes managed root")
     if not project_dir.is_dir():
         raise HTTPException(status_code=404, detail=f"unknown project: {project_id}")
     return project_dir

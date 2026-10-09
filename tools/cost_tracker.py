@@ -487,6 +487,8 @@ class CostTracker:
     def _save(self) -> None:
         if self.cost_log_path is None:
             return
+        from lib.checkpoint import check_studio_tool_writer
+        check_studio_tool_writer({"output_path": self.cost_log_path})
         data = {
             "version": "1.0",
             "budget_total_usd": self.budget_total_usd,

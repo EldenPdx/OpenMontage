@@ -104,7 +104,11 @@ def _block_network():
     socket.socket.connect_ex = guarded_connect_ex
     socket.create_connection = guarded_create_connection
     try:
-        yield
+        # A loopback proxy can otherwise relay paid traffic past the socket guard.
+        with pytest.MonkeyPatch.context() as environment:
+            environment.setenv("NO_PROXY", "*")
+            environment.setenv("no_proxy", "*")
+            yield
     finally:
         socket.socket.connect = _real_connect
         socket.socket.connect_ex = _real_connect_ex

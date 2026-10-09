@@ -26,6 +26,7 @@
             "type": "string",
             "enum": [
               "pipeline_selection",
+              "approval_policy",
               "provider_selection",
               "renderer_family_selection",
               "render_runtime_selection",

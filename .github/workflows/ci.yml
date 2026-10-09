@@ -20,6 +20,22 @@ jobs:
   validate:
     name: Validate Python
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17.11-alpine
+        env:
+          POSTGRES_DB: studio_test
+          POSTGRES_USER: studio_test
+          POSTGRES_PASSWORD: ci-local-test-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U studio_test -d studio_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      STUDIO_TEST_DATABASE_URL: postgresql://studio_test:ci-local-test-only@127.0.0.1:5432/studio_test
+      STUDIO_REQUIRE_INTEGRATION: "1"
 
     steps:
       - name: Checkout repository
@@ -33,12 +49,25 @@ jobs:
           cache-dependency-path: |
             requirements.txt
             requirements-dev.txt
+            requirements-studio.txt
+            requirements-studio-dev.txt
+
+      - name: Set up the pinned Pi Node runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.19.0"
 
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
       - name: Install dependencies
-        run: make install-dev
+        run: make install-studio-dev
+
+      - name: Build official pinned Pi and check real RPC
+        run: make studio-pi && .venv/bin/python pi-runtime/check.py
+
+      - name: Install Chromium for real browser verification
+        run: .venv/bin/python -m playwright install --with-deps chromium
 
       - name: Run lint smoke checks
         run: make lint

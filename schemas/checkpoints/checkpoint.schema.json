@@ -36,6 +36,8 @@
       "properties": {
         "total_spent_usd": { "type": "number" },
         "total_reserved_usd": { "type": "number" },
+        "price_status": { "type": "string", "enum": ["quoted", "unquoted"] },
+        "unknown_call_count": { "type": "integer", "minimum": 0 },
         "budget_remaining_usd": { "type": "number" }
       }
     },

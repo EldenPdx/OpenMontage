@@ -1,0 +1,3 @@
+# Browser Studio adds a PostgreSQL driver to the existing application.
+-r requirements.txt
+psycopg[binary]>=3.2,<4

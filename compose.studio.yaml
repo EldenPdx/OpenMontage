@@ -1,0 +1,44 @@
+name: openmontage-studio
+services:
+  postgres:
+    image: public.ecr.aws/docker/library/postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    environment:
+      POSTGRES_USER: openmontage
+      POSTGRES_DB: openmontage_studio
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openmontage -d openmontage_studio"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  runtime:
+    profiles: [runtime]
+    build:
+      context: .
+      dockerfile: Dockerfile.studio
+    image: openmontage-studio:dev
+    init: true
+    env_file:
+      - .runtime/studio/database.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["python", "pi-runtime/check.py"]
+    volumes:
+      - studio-state:/app/.runtime/studio
+
+secrets:
+  postgres_password:
+    file: .runtime/studio/postgres.password
+
+volumes:
+  postgres-data:
+  studio-state:

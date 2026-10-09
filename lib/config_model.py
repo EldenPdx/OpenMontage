@@ -8,7 +8,7 @@ from __future__ import annotations
 from enum import Enum
 import ipaddress
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 from urllib.parse import urlsplit, urlunsplit
 
 import yaml
@@ -150,6 +150,101 @@ class PathsConfig(BaseModel):
     output_dir: str = "output"
 
 
+class PiPrice(BaseModel):
+    """Estimated integer USD micros per million tokens, not gateway billing."""
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    input: int = Field(strict=True, ge=0)
+    output: int = Field(strict=True, ge=0)
+    cache_read: int = Field(strict=True, ge=0)
+    cache_write: int = Field(strict=True, ge=0)
+
+
+class PiProfile(BaseModel):
+    """Administrator-selected agent transport; never accepted from task input."""
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    provider: str = Field(default="xvan", pattern=r"^[a-z0-9][a-z0-9_-]{0,79}$")
+    base_url: str = "https://xvan.ai/v1"
+    api: Literal["openai-responses", "openai-completions", "anthropic-messages"] = "openai-responses"
+    model: str = Field(default="gpt-5.6-sol", min_length=1, max_length=200)
+    credential_env: str = Field(default="NEW_API_KEY", pattern=r"^[A-Z_][A-Z0-9_]*$")
+    input: list[Literal["text", "image"]] = Field(default_factory=lambda: ["text", "image"], min_length=1)
+    context_window: int = Field(default=200_000, ge=32, strict=True)
+    max_output_tokens: int = Field(default=16_384, ge=16, strict=True)
+    reasoning: bool = True
+    thinking_level: Literal["off", "minimal", "low", "medium", "high", "xhigh", "max"] = "medium"
+    sampling_params: dict[str, float] = Field(default_factory=dict)
+    header_env: dict[str, str] = Field(default_factory=dict)
+    startup_timeout_seconds: float = Field(default=15, gt=0, allow_inf_nan=False)
+    request_timeout_seconds: float = Field(default=180, gt=0, allow_inf_nan=False)
+    idle_timeout_seconds: float = Field(default=300, gt=0, allow_inf_nan=False)
+    task_timeout_seconds: float = Field(default=3600, gt=0, allow_inf_nan=False)
+    max_turns: int = Field(default=100, strict=True, ge=1)
+    max_retries: int = Field(default=0, strict=True, ge=0, le=5)
+    price: PiPrice | None = None
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_endpoint(cls, value):
+        normalize_newapi_url(value)  # Reuse credential/path/public-HTTP checks without changing API prefixes.
+        return value.rstrip("/")
+
+    @model_validator(mode="after")
+    def validate_agent_capabilities(self):
+        import math
+        import re
+
+        if "text" not in self.input or self.max_output_tokens >= self.context_window:
+            raise ValueError("Agent requires text input and output tokens below context window")
+        protected = {"HOME", "PATH", "LANG", "LC_ALL", "NODE_OPTIONS", "NODE_PATH",
+                     "PI_CODING_AGENT_DIR", "PI_OFFLINE", "PI_CACHE_RETENTION"}
+        if protected.intersection({self.credential_env, *self.header_env.values()}):
+            raise ValueError("Credential references cannot replace isolation environment")
+        if not self.reasoning and self.thinking_level != "off":
+            raise ValueError("Non-reasoning models require thinking_level=off")
+        allowed = {"temperature": (0, 2), "top_p": (0, 1), "top_k": (0, None),
+                   "min_p": (0, 1), "frequency_penalty": (-2, 2), "presence_penalty": (-2, 2),
+                   "repetition_penalty": (0, None), "seed": (0, None)}
+        if self.sampling_params and self.api == "anthropic-messages":
+            raise ValueError("sampling_params require an OpenAI-compatible API")
+        for name, value in self.sampling_params.items():
+            if name not in allowed or not math.isfinite(value):
+                raise ValueError("Unsupported sampling parameter")
+            low, high = allowed[name]
+            if value < low or (high is not None and value > high):
+                raise ValueError("Sampling parameter is out of range")
+            if name in {"seed", "top_k"} and not value.is_integer():
+                raise ValueError("Sampling count/seed must be an integer")
+        for header, reference in self.header_env.items():
+            if not re.fullmatch(r"[A-Za-z][A-Za-z0-9-]*", header) or not re.fullmatch(r"[A-Z_][A-Z0-9_]*", reference):
+                raise ValueError("Headers require safe names and backend environment references")
+            if header.lower() in {"host", "content-length", "connection", "transfer-encoding"}:
+                raise ValueError("Routing headers cannot be configured")
+        return self
+
+
+class StudioConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    enabled: bool = False
+    default_profile: str = "xvan"
+    profiles: dict[str, PiProfile] = Field(default_factory=lambda: {"xvan": PiProfile()})
+    concurrency: Literal[1] = 1
+    media_models: dict[str, str] = Field(default_factory=lambda: {
+        "image": "Images2.5-Flare", "video": "dreamina-seedance-2-5-260628",
+    })
+
+    @model_validator(mode="after")
+    def validate_profiles(self):
+        import re
+
+        if self.default_profile not in self.profiles:
+            raise ValueError("Default Studio profile must exist")
+        if any(not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,79}", name) for name in self.profiles):
+            raise ValueError("Invalid Studio profile identifier")
+        return self
+
+
 class OpenMontageConfig(BaseModel):
     """Top-level runtime configuration."""
 
@@ -161,6 +256,7 @@ class OpenMontageConfig(BaseModel):
     output: OutputConfig = Field(default_factory=OutputConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
     newapi: NewAPIConfig = Field(default_factory=NewAPIConfig)
+    studio: StudioConfig = Field(default_factory=StudioConfig)
 
     @classmethod
     def load(cls, config_path: Optional[Path] = None) -> "OpenMontageConfig":

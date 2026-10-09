@@ -1,0 +1,3 @@
+-r requirements-studio.txt
+-r requirements-dev.txt
+playwright>=1.63,<2

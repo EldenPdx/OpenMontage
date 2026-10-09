@@ -1,0 +1,1051 @@
+[
+  {
+    "name": "create",
+    "schema": "TaskCreate",
+    "value": {
+      "brief": "Explain how a lighthouse works",
+      "profile_id": "xvan",
+      "duration_seconds": 30,
+      "aspect_ratio": "16:9",
+      "narration": false,
+      "budget_usd_micros": 10000000
+    }
+  },
+  {
+    "name": "xvan-profile",
+    "schema": "ConfigSnapshot",
+    "value": {
+      "profile_id": "xvan",
+      "provider": "xvan",
+      "model": "gpt-5.6-sol",
+      "api": "openai-responses",
+      "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "budget_usd_micros": 10000000,
+      "single_action_approval_usd_micros": 500000,
+      "max_output_tokens": 16384,
+      "max_turns": 100,
+      "task_timeout_seconds": 3600,
+      "media_models": {},
+      "price_status": "unquoted"
+    }
+  },
+  {
+    "name": "local-profile",
+    "schema": "ConfigSnapshot",
+    "value": {
+      "profile_id": "local",
+      "provider": "local",
+      "model": "test-model",
+      "api": "openai-completions",
+      "configuration_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "budget_usd_micros": 10000000,
+      "single_action_approval_usd_micros": 500000,
+      "max_output_tokens": 16384,
+      "max_turns": 100,
+      "task_timeout_seconds": 3600,
+      "media_models": {},
+      "price_status": "quoted"
+    }
+  },
+  {
+    "name": "queued",
+    "schema": "TaskRecord",
+    "value": {
+      "task_id": "task-a",
+      "project_id": "lighthouse-a",
+      "run_id": "run-a",
+      "version": 1,
+      "state": "queued",
+      "request": {
+        "brief": "Explain how a lighthouse works",
+        "profile_id": "xvan",
+        "duration_seconds": 30,
+        "aspect_ratio": "16:9",
+        "narration": false,
+        "budget_usd_micros": 10000000
+      },
+      "config_snapshot": {
+        "profile_id": "xvan",
+        "provider": "xvan",
+        "model": "gpt-5.6-sol",
+        "api": "openai-responses",
+        "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "budget_usd_micros": 10000000,
+        "single_action_approval_usd_micros": 500000,
+        "max_output_tokens": 16384,
+        "max_turns": 100,
+        "task_timeout_seconds": 3600,
+        "media_models": {},
+        "price_status": "unquoted"
+      },
+      "current_stage": null,
+      "approval": null,
+      "cost": {
+        "currency": "USD",
+        "budget_usd_micros": 10000000,
+        "reserved_usd_micros": 0,
+        "spent_usd_micros": 0,
+        "unknown_call_count": 0,
+        "price_status": "unquoted"
+      },
+      "error": null,
+      "result": null,
+      "created_at": "2026-10-09T00:00:00Z",
+      "updated_at": null
+    }
+  },
+  {
+    "name": "running",
+    "schema": "TaskRecord",
+    "value": {
+      "task_id": "task-a",
+      "project_id": "lighthouse-a",
+      "run_id": "run-a",
+      "version": 2,
+      "state": "running",
+      "request": {
+        "brief": "Explain how a lighthouse works",
+        "profile_id": "xvan",
+        "duration_seconds": 30,
+        "aspect_ratio": "16:9",
+        "narration": false,
+        "budget_usd_micros": 10000000
+      },
+      "config_snapshot": {
+        "profile_id": "xvan",
+        "provider": "xvan",
+        "model": "gpt-5.6-sol",
+        "api": "openai-responses",
+        "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "budget_usd_micros": 10000000,
+        "single_action_approval_usd_micros": 500000,
+        "max_output_tokens": 16384,
+        "max_turns": 100,
+        "task_timeout_seconds": 3600,
+        "media_models": {},
+        "price_status": "unquoted"
+      },
+      "current_stage": null,
+      "approval": null,
+      "cost": {
+        "currency": "USD",
+        "budget_usd_micros": 10000000,
+        "reserved_usd_micros": 0,
+        "spent_usd_micros": 0,
+        "unknown_call_count": 0,
+        "price_status": "unquoted"
+      },
+      "error": null,
+      "result": null,
+      "created_at": "2026-10-09T00:00:00Z",
+      "updated_at": null
+    }
+  },
+  {
+    "name": "run-context",
+    "schema": "RunContext",
+    "value": {
+      "task_id": "task-a",
+      "project_id": "lighthouse-a",
+      "run_id": "run-a",
+      "attempt": 1,
+      "fence": 1,
+      "config_snapshot": {
+        "profile_id": "xvan",
+        "provider": "xvan",
+        "model": "gpt-5.6-sol",
+        "api": "openai-responses",
+        "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "budget_usd_micros": 10000000,
+        "single_action_approval_usd_micros": 500000,
+        "max_output_tokens": 16384,
+        "max_turns": 100,
+        "task_timeout_seconds": 3600,
+        "media_models": {},
+        "price_status": "unquoted"
+      },
+      "session": {
+        "path": "task-a/run-a/session.jsonl",
+        "session_id": null
+      }
+    }
+  },
+  {
+    "name": "start-command",
+    "schema": "TaskCommand",
+    "value": {
+      "command_id": "command-a",
+      "task_id": "task-a",
+      "run_id": "run-a",
+      "kind": "start",
+      "expected_version": 1,
+      "idempotency_key": "create_lighthouse_001",
+      "payload": {},
+      "status": "pending"
+    }
+  },
+  {
+    "name": "gate-proposal",
+    "schema": "ApprovalRequest",
+    "value": {
+      "binding": {
+        "task_id": "task-a",
+        "run_id": "run-a",
+        "gate_id": "gate-proposal",
+        "checkpoint_revision": 1,
+        "checkpoint_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "artifact_revision": 1,
+        "artifact_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "scope_sha256": "68e1e31af1731789a7caf6a930334c84b1bf28f4e2f53905af4436142ba6d233"
+      },
+      "stage": "proposal",
+      "artifact": {
+        "path": "artifacts/proposal_packet.json",
+        "revision": 1,
+        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "checkpoint": {
+        "path": "checkpoint_proposal.json",
+        "revision": 1,
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "scope": {
+        "provider": "xvan",
+        "model": "gpt-5.6-sol",
+        "render_runtime": "ffmpeg",
+        "budget_usd_micros": 10000000,
+        "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "media_models": {},
+        "narration": false,
+        "unknown_price": false,
+        "authorized_limit_usd_micros": null
+      },
+      "summary": "Review proposal",
+      "options": [
+        {
+          "option_id": "keep-current",
+          "label": "Keep the displayed selection",
+          "description": ""
+        }
+      ],
+      "status": "pending"
+    }
+  },
+  {
+    "name": "awaiting-proposal",
+    "schema": "TaskRecord",
+    "value": {
+      "task_id": "task-a",
+      "project_id": "lighthouse-a",
+      "run_id": "run-a",
+      "version": 3,
+      "state": "awaiting_approval",
+      "request": {
+        "brief": "Explain how a lighthouse works",
+        "profile_id": "xvan",
+        "duration_seconds": 30,
+        "aspect_ratio": "16:9",
+        "narration": false,
+        "budget_usd_micros": 10000000
+      },
+      "config_snapshot": {
+        "profile_id": "xvan",
+        "provider": "xvan",
+        "model": "gpt-5.6-sol",
+        "api": "openai-responses",
+        "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "budget_usd_micros": 10000000,
+        "single_action_approval_usd_micros": 500000,
+        "max_output_tokens": 16384,
+        "max_turns": 100,
+        "task_timeout_seconds": 3600,
+        "media_models": {},
+        "price_status": "unquoted"
+      },
+      "current_stage": "proposal",
+      "approval": {
+        "binding": {
+          "task_id": "task-a",
+          "run_id": "run-a",
+          "gate_id": "gate-proposal",
+          "checkpoint_revision": 1,
+          "checkpoint_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "artifact_revision": 1,
+          "artifact_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "scope_sha256": "68e1e31af1731789a7caf6a930334c84b1bf28f4e2f53905af4436142ba6d233"
+        },
+        "stage": "proposal",
+        "artifact": {
+          "path": "artifacts/proposal_packet.json",
+          "revision": 1,
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "checkpoint": {
+          "path": "checkpoint_proposal.json",
+          "revision": 1,
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "scope": {
+          "provider": "xvan",
+          "model": "gpt-5.6-sol",
+          "render_runtime": "ffmpeg",
+          "budget_usd_micros": 10000000,
+          "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "media_models": {},
+          "narration": false,
+          "unknown_price": false,
+          "authorized_limit_usd_micros": null
+        },
+        "summary": "Review proposal",
+        "options": [
+          {
+            "option_id": "keep-current",
+            "label": "Keep the displayed selection",
+            "description": ""
+          }
+        ],
+        "status": "pending"
+      },
+      "cost": {
+        "currency": "USD",
+        "budget_usd_micros": 10000000,
+        "reserved_usd_micros": 0,
+        "spent_usd_micros": 0,
+        "unknown_call_count": 0,
+        "price_status": "unquoted"
+      },
+      "error": null,
+      "result": null,
+      "created_at": "2026-10-09T00:00:00Z",
+      "updated_at": null
+    }
+  },
+  {
+    "name": "approve-proposal",
+    "schema": "ApprovalDecision",
+    "value": {
+      "expected_version": 3,
+      "binding": {
+        "task_id": "task-a",
+        "run_id": "run-a",
+        "gate_id": "gate-proposal",
+        "checkpoint_revision": 1,
+        "checkpoint_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "artifact_revision": 1,
+        "artifact_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "scope_sha256": "68e1e31af1731789a7caf6a930334c84b1bf28f4e2f53905af4436142ba6d233"
+      },
+      "decision": "approve",
+      "comment": "",
+      "selected_option_ids": [
+        "keep-current"
+      ]
+    }
+  },
+  {
+    "name": "gate-script",
+    "schema": "ApprovalRequest",
+    "value": {
+      "binding": {
+        "task_id": "task-a",
+        "run_id": "run-a",
+        "gate_id": "gate-script",
+        "checkpoint_revision": 1,
+        "checkpoint_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "artifact_revision": 1,
+        "artifact_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "scope_sha256": "68e1e31af1731789a7caf6a930334c84b1bf28f4e2f53905af4436142ba6d233"
+      },
+      "stage": "script",
+      "artifact": {
+        "path": "artifacts/script.json",
+        "revision": 1,
+        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "checkpoint": {
+        "path": "checkpoint_script.json",
+        "revision": 1,
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "scope": {
+        "provider": "xvan",
+        "model": "gpt-5.6-sol",
+        "render_runtime": "ffmpeg",
+        "budget_usd_micros": 10000000,
+        "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "media_models": {},
+        "narration": false,
+        "unknown_price": false,
+        "authorized_limit_usd_micros": null
+      },
+      "summary": "Review script",
+      "options": [
+        {
+          "option_id": "keep-current",
+          "label": "Keep the displayed selection",
+          "description": ""
+        }
+      ],
+      "status": "pending"
+    }
+  },
+  {
+    "name": "awaiting-script",
+    "schema": "TaskRecord",
+    "value": {
+      "task_id": "task-a",
+      "project_id": "lighthouse-a",
+      "run_id": "run-a",
+      "version": 4,
+      "state": "awaiting_approval",
+      "request": {
+        "brief": "Explain how a lighthouse works",
+        "profile_id": "xvan",
+        "duration_seconds": 30,
+        "aspect_ratio": "16:9",
+        "narration": false,
+        "budget_usd_micros": 10000000
+      },
+      "config_snapshot": {
+        "profile_id": "xvan",
+        "provider": "xvan",
+        "model": "gpt-5.6-sol",
+        "api": "openai-responses",
+        "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "budget_usd_micros": 10000000,
+        "single_action_approval_usd_micros": 500000,
+        "max_output_tokens": 16384,
+        "max_turns": 100,
+        "task_timeout_seconds": 3600,
+        "media_models": {},
+        "price_status": "unquoted"
+      },
+      "current_stage": "script",
+      "approval": {
+        "binding": {
+          "task_id": "task-a",
+          "run_id": "run-a",
+          "gate_id": "gate-script",
+          "checkpoint_revision": 1,
+          "checkpoint_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "artifact_revision": 1,
+          "artifact_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "scope_sha256": "68e1e31af1731789a7caf6a930334c84b1bf28f4e2f53905af4436142ba6d233"
+        },
+        "stage": "script",
+        "artifact": {
+          "path": "artifacts/script.json",
+          "revision": 1,
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "checkpoint": {
+          "path": "checkpoint_script.json",
+          "revision": 1,
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "scope": {
+          "provider": "xvan",
+          "model": "gpt-5.6-sol",
+          "render_runtime": "ffmpeg",
+          "budget_usd_micros": 10000000,
+          "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "media_models": {},
+          "narration": false,
+          "unknown_price": false,
+          "authorized_limit_usd_micros": null
+        },
+        "summary": "Review script",
+        "options": [
+          {
+            "option_id": "keep-current",
+            "label": "Keep the displayed selection",
+            "description": ""
+          }
+        ],
+        "status": "pending"
+      },
+      "cost": {
+        "currency": "USD",
+        "budget_usd_micros": 10000000,
+        "reserved_usd_micros": 0,
+        "spent_usd_micros": 0,
+        "unknown_call_count": 0,
+        "price_status": "unquoted"
+      },
+      "error": null,
+      "result": null,
+      "created_at": "2026-10-09T00:00:00Z",
+      "updated_at": null
+    }
+  },
+  {
+    "name": "approve-script",
+    "schema": "ApprovalDecision",
+    "value": {
+      "expected_version": 4,
+      "binding": {
+        "task_id": "task-a",
+        "run_id": "run-a",
+        "gate_id": "gate-script",
+        "checkpoint_revision": 1,
+        "checkpoint_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "artifact_revision": 1,
+        "artifact_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "scope_sha256": "68e1e31af1731789a7caf6a930334c84b1bf28f4e2f53905af4436142ba6d233"
+      },
+      "decision": "approve",
+      "comment": "",
+      "selected_option_ids": [
+        "keep-current"
+      ]
+    }
+  },
+  {
+    "name": "gate-scene_plan",
+    "schema": "ApprovalRequest",
+    "value": {
+      "binding": {
+        "task_id": "task-a",
+        "run_id": "run-a",
+        "gate_id": "gate-scene_plan",
+        "checkpoint_revision": 1,
+        "checkpoint_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "artifact_revision": 1,
+        "artifact_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "scope_sha256": "68e1e31af1731789a7caf6a930334c84b1bf28f4e2f53905af4436142ba6d233"
+      },
+      "stage": "scene_plan",
+      "artifact": {
+        "path": "artifacts/scene_plan.json",
+        "revision": 1,
+        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "checkpoint": {
+        "path": "checkpoint_scene_plan.json",
+        "revision": 1,
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "scope": {
+        "provider": "xvan",
+        "model": "gpt-5.6-sol",
+        "render_runtime": "ffmpeg",
+        "budget_usd_micros": 10000000,
+        "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "media_models": {},
+        "narration": false,
+        "unknown_price": false,
+        "authorized_limit_usd_micros": null
+      },
+      "summary": "Review scene_plan",
+      "options": [
+        {
+          "option_id": "keep-current",
+          "label": "Keep the displayed selection",
+          "description": ""
+        }
+      ],
+      "status": "pending"
+    }
+  },
+  {
+    "name": "awaiting-scene_plan",
+    "schema": "TaskRecord",
+    "value": {
+      "task_id": "task-a",
+      "project_id": "lighthouse-a",
+      "run_id": "run-a",
+      "version": 5,
+      "state": "awaiting_approval",
+      "request": {
+        "brief": "Explain how a lighthouse works",
+        "profile_id": "xvan",
+        "duration_seconds": 30,
+        "aspect_ratio": "16:9",
+        "narration": false,
+        "budget_usd_micros": 10000000
+      },
+      "config_snapshot": {
+        "profile_id": "xvan",
+        "provider": "xvan",
+        "model": "gpt-5.6-sol",
+        "api": "openai-responses",
+        "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "budget_usd_micros": 10000000,
+        "single_action_approval_usd_micros": 500000,
+        "max_output_tokens": 16384,
+        "max_turns": 100,
+        "task_timeout_seconds": 3600,
+        "media_models": {},
+        "price_status": "unquoted"
+      },
+      "current_stage": "scene_plan",
+      "approval": {
+        "binding": {
+          "task_id": "task-a",
+          "run_id": "run-a",
+          "gate_id": "gate-scene_plan",
+          "checkpoint_revision": 1,
+          "checkpoint_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "artifact_revision": 1,
+          "artifact_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "scope_sha256": "68e1e31af1731789a7caf6a930334c84b1bf28f4e2f53905af4436142ba6d233"
+        },
+        "stage": "scene_plan",
+        "artifact": {
+          "path": "artifacts/scene_plan.json",
+          "revision": 1,
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "checkpoint": {
+          "path": "checkpoint_scene_plan.json",
+          "revision": 1,
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "scope": {
+          "provider": "xvan",
+          "model": "gpt-5.6-sol",
+          "render_runtime": "ffmpeg",
+          "budget_usd_micros": 10000000,
+          "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "media_models": {},
+          "narration": false,
+          "unknown_price": false,
+          "authorized_limit_usd_micros": null
+        },
+        "summary": "Review scene_plan",
+        "options": [
+          {
+            "option_id": "keep-current",
+            "label": "Keep the displayed selection",
+            "description": ""
+          }
+        ],
+        "status": "pending"
+      },
+      "cost": {
+        "currency": "USD",
+        "budget_usd_micros": 10000000,
+        "reserved_usd_micros": 0,
+        "spent_usd_micros": 0,
+        "unknown_call_count": 0,
+        "price_status": "unquoted"
+      },
+      "error": null,
+      "result": null,
+      "created_at": "2026-10-09T00:00:00Z",
+      "updated_at": null
+    }
+  },
+  {
+    "name": "approve-scene_plan",
+    "schema": "ApprovalDecision",
+    "value": {
+      "expected_version": 5,
+      "binding": {
+        "task_id": "task-a",
+        "run_id": "run-a",
+        "gate_id": "gate-scene_plan",
+        "checkpoint_revision": 1,
+        "checkpoint_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "artifact_revision": 1,
+        "artifact_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "scope_sha256": "68e1e31af1731789a7caf6a930334c84b1bf28f4e2f53905af4436142ba6d233"
+      },
+      "decision": "approve",
+      "comment": "",
+      "selected_option_ids": [
+        "keep-current"
+      ]
+    }
+  },
+  {
+    "name": "gate-assets",
+    "schema": "ApprovalRequest",
+    "value": {
+      "binding": {
+        "task_id": "task-a",
+        "run_id": "run-a",
+        "gate_id": "gate-assets",
+        "checkpoint_revision": 1,
+        "checkpoint_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "artifact_revision": 1,
+        "artifact_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "scope_sha256": "68e1e31af1731789a7caf6a930334c84b1bf28f4e2f53905af4436142ba6d233"
+      },
+      "stage": "assets",
+      "artifact": {
+        "path": "artifacts/asset_manifest.json",
+        "revision": 1,
+        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "checkpoint": {
+        "path": "checkpoint_assets.json",
+        "revision": 1,
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "scope": {
+        "provider": "xvan",
+        "model": "gpt-5.6-sol",
+        "render_runtime": "ffmpeg",
+        "budget_usd_micros": 10000000,
+        "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "media_models": {},
+        "narration": false,
+        "unknown_price": false,
+        "authorized_limit_usd_micros": null
+      },
+      "summary": "Review assets",
+      "options": [
+        {
+          "option_id": "keep-current",
+          "label": "Keep the displayed selection",
+          "description": ""
+        }
+      ],
+      "status": "pending"
+    }
+  },
+  {
+    "name": "awaiting-assets",
+    "schema": "TaskRecord",
+    "value": {
+      "task_id": "task-a",
+      "project_id": "lighthouse-a",
+      "run_id": "run-a",
+      "version": 6,
+      "state": "awaiting_approval",
+      "request": {
+        "brief": "Explain how a lighthouse works",
+        "profile_id": "xvan",
+        "duration_seconds": 30,
+        "aspect_ratio": "16:9",
+        "narration": false,
+        "budget_usd_micros": 10000000
+      },
+      "config_snapshot": {
+        "profile_id": "xvan",
+        "provider": "xvan",
+        "model": "gpt-5.6-sol",
+        "api": "openai-responses",
+        "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "budget_usd_micros": 10000000,
+        "single_action_approval_usd_micros": 500000,
+        "max_output_tokens": 16384,
+        "max_turns": 100,
+        "task_timeout_seconds": 3600,
+        "media_models": {},
+        "price_status": "unquoted"
+      },
+      "current_stage": "assets",
+      "approval": {
+        "binding": {
+          "task_id": "task-a",
+          "run_id": "run-a",
+          "gate_id": "gate-assets",
+          "checkpoint_revision": 1,
+          "checkpoint_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "artifact_revision": 1,
+          "artifact_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "scope_sha256": "68e1e31af1731789a7caf6a930334c84b1bf28f4e2f53905af4436142ba6d233"
+        },
+        "stage": "assets",
+        "artifact": {
+          "path": "artifacts/asset_manifest.json",
+          "revision": 1,
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "checkpoint": {
+          "path": "checkpoint_assets.json",
+          "revision": 1,
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "scope": {
+          "provider": "xvan",
+          "model": "gpt-5.6-sol",
+          "render_runtime": "ffmpeg",
+          "budget_usd_micros": 10000000,
+          "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "media_models": {},
+          "narration": false,
+          "unknown_price": false,
+          "authorized_limit_usd_micros": null
+        },
+        "summary": "Review assets",
+        "options": [
+          {
+            "option_id": "keep-current",
+            "label": "Keep the displayed selection",
+            "description": ""
+          }
+        ],
+        "status": "pending"
+      },
+      "cost": {
+        "currency": "USD",
+        "budget_usd_micros": 10000000,
+        "reserved_usd_micros": 0,
+        "spent_usd_micros": 0,
+        "unknown_call_count": 0,
+        "price_status": "unquoted"
+      },
+      "error": null,
+      "result": null,
+      "created_at": "2026-10-09T00:00:00Z",
+      "updated_at": null
+    }
+  },
+  {
+    "name": "approve-assets",
+    "schema": "ApprovalDecision",
+    "value": {
+      "expected_version": 6,
+      "binding": {
+        "task_id": "task-a",
+        "run_id": "run-a",
+        "gate_id": "gate-assets",
+        "checkpoint_revision": 1,
+        "checkpoint_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "artifact_revision": 1,
+        "artifact_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "scope_sha256": "68e1e31af1731789a7caf6a930334c84b1bf28f4e2f53905af4436142ba6d233"
+      },
+      "decision": "approve",
+      "comment": "",
+      "selected_option_ids": [
+        "keep-current"
+      ]
+    }
+  },
+  {
+    "name": "revise-assets",
+    "schema": "ApprovalDecision",
+    "value": {
+      "expected_version": 6,
+      "binding": {
+        "task_id": "task-a",
+        "run_id": "run-a",
+        "gate_id": "gate-assets",
+        "checkpoint_revision": 1,
+        "checkpoint_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "artifact_revision": 1,
+        "artifact_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "scope_sha256": "68e1e31af1731789a7caf6a930334c84b1bf28f4e2f53905af4436142ba6d233"
+      },
+      "decision": "revise",
+      "comment": "Use a closer view of the lighthouse.",
+      "selected_option_ids": []
+    }
+  },
+  {
+    "name": "cancel",
+    "schema": "CancelRequest",
+    "value": {
+      "expected_version": 2,
+      "reason": "User requested cancellation"
+    }
+  },
+  {
+    "name": "resume",
+    "schema": "ResumeRequest",
+    "value": {
+      "expected_version": 7,
+      "comment": "Dependencies have been restored; reconcile first."
+    }
+  },
+  {
+    "name": "succeeded",
+    "schema": "TaskRecord",
+    "value": {
+      "task_id": "task-a",
+      "project_id": "lighthouse-a",
+      "run_id": "run-a",
+      "version": 10,
+      "state": "succeeded",
+      "request": {
+        "brief": "Explain how a lighthouse works",
+        "profile_id": "xvan",
+        "duration_seconds": 30,
+        "aspect_ratio": "16:9",
+        "narration": false,
+        "budget_usd_micros": 10000000
+      },
+      "config_snapshot": {
+        "profile_id": "xvan",
+        "provider": "xvan",
+        "model": "gpt-5.6-sol",
+        "api": "openai-responses",
+        "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "budget_usd_micros": 10000000,
+        "single_action_approval_usd_micros": 500000,
+        "max_output_tokens": 16384,
+        "max_turns": 100,
+        "task_timeout_seconds": 3600,
+        "media_models": {},
+        "price_status": "unquoted"
+      },
+      "current_stage": null,
+      "approval": null,
+      "cost": {
+        "currency": "USD",
+        "budget_usd_micros": 10000000,
+        "reserved_usd_micros": 0,
+        "spent_usd_micros": 0,
+        "unknown_call_count": 0,
+        "price_status": "unquoted"
+      },
+      "error": null,
+      "result": {
+        "render_report": {
+          "path": "artifacts/render_report.json",
+          "revision": 1,
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "video": {
+          "path": "renders/final.mp4",
+          "revision": 1,
+          "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        },
+        "bytes": 8192,
+        "duration_seconds": 30.0,
+        "width": 1920,
+        "height": 1080,
+        "verified": true
+      },
+      "created_at": "2026-10-09T00:00:00Z",
+      "updated_at": null
+    }
+  },
+  {
+    "name": "recovery-required",
+    "schema": "TaskRecord",
+    "value": {
+      "task_id": "task-a",
+      "project_id": "lighthouse-a",
+      "run_id": "run-a",
+      "version": 7,
+      "state": "recovery_required",
+      "request": {
+        "brief": "Explain how a lighthouse works",
+        "profile_id": "xvan",
+        "duration_seconds": 30,
+        "aspect_ratio": "16:9",
+        "narration": false,
+        "budget_usd_micros": 10000000
+      },
+      "config_snapshot": {
+        "profile_id": "xvan",
+        "provider": "xvan",
+        "model": "gpt-5.6-sol",
+        "api": "openai-responses",
+        "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "budget_usd_micros": 10000000,
+        "single_action_approval_usd_micros": 500000,
+        "max_output_tokens": 16384,
+        "max_turns": 100,
+        "task_timeout_seconds": 3600,
+        "media_models": {},
+        "price_status": "unquoted"
+      },
+      "current_stage": null,
+      "approval": null,
+      "cost": {
+        "currency": "USD",
+        "budget_usd_micros": 10000000,
+        "reserved_usd_micros": 0,
+        "spent_usd_micros": 0,
+        "unknown_call_count": 0,
+        "price_status": "unquoted"
+      },
+      "error": {
+        "code": "outcome_unknown",
+        "message": "Remote acceptance has no reliable receipt",
+        "retryable": false,
+        "recovery_actions": [
+          "reconcile",
+          "cancel"
+        ]
+      },
+      "result": null,
+      "created_at": "2026-10-09T00:00:00Z",
+      "updated_at": null
+    }
+  },
+  {
+    "name": "state-event",
+    "schema": "StudioEvent",
+    "value": {
+      "event_id": 12,
+      "task_id": "task-a",
+      "run_id": "run-a",
+      "task_version": 2,
+      "type": "state",
+      "data": {
+        "state": "running"
+      },
+      "created_at": "2026-10-09T00:00:00Z"
+    }
+  },
+  {
+    "name": "unknown-model-submit",
+    "schema": "CallIntent",
+    "value": {
+      "call_id": "call-a",
+      "task_id": "task-a",
+      "run_id": "run-a",
+      "fence": 1,
+      "kind": "model",
+      "operation": "prompt",
+      "provider": "xvan",
+      "model": "gpt-5.6-sol",
+      "request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "price_status": "unquoted",
+      "reserved_usd_micros": null,
+      "actual_usd_micros": null,
+      "status": "outcome_unknown",
+      "external_job_id": null,
+      "resume_reference": null,
+      "usage": {}
+    }
+  },
+  {
+    "name": "known-tool-job",
+    "schema": "CallIntent",
+    "value": {
+      "call_id": "call-b",
+      "task_id": "task-a",
+      "run_id": "run-a",
+      "fence": 1,
+      "kind": "tool",
+      "operation": "generate",
+      "provider": "test-provider",
+      "model": "test-video",
+      "request_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "price_status": "quoted",
+      "reserved_usd_micros": 100000,
+      "actual_usd_micros": null,
+      "status": "receipted",
+      "external_job_id": "remote-job-a",
+      "resume_reference": {
+        "job_id": "remote-job-a"
+      },
+      "usage": {}
+    }
+  },
+  {
+    "name": "file-intent",
+    "schema": "FileWriteIntent",
+    "value": {
+      "intent_id": "file-a",
+      "task_id": "task-a",
+      "run_id": "run-a",
+      "fence": 1,
+      "target": {
+        "path": "artifacts/script.json",
+        "revision": 2,
+        "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "previous_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "status": "prepared"
+    }
+  }
+]

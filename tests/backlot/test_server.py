@@ -86,6 +86,15 @@ def _write_png(path: Path, color: tuple[int, int, int] = (200, 40, 80)) -> None:
 
 
 class TestBacklotServerApi:
+    def test_project_symlink_cannot_serve_files_outside_projects(self, client, projects_root, tmp_path):
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "private.json").write_text('{"private":"outside-data"}')
+        (projects_root / "shortcut").symlink_to(outside, target_is_directory=True)
+        response = client.get("/media/shortcut/private.json")
+        assert response.status_code == 403
+        assert "outside-data" not in response.text
+
     def test_health(self, client):
         response = client.get("/api/health")
         assert response.status_code == 200

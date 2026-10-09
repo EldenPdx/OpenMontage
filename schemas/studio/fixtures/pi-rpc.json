@@ -1,0 +1,41 @@
+{
+  "source": "earendil-works/pi",
+  "version": "1.1.0",
+  "commit": "abe508e1b89912adde45528136c3221eb69acdd7",
+  "request": {
+    "id": "prompt-1",
+    "type": "prompt",
+    "message": "Read AGENT_GUIDE.md and continue the bound task"
+  },
+  "response": {
+    "id": "prompt-1",
+    "type": "response",
+    "command": "prompt",
+    "success": true,
+    "data": {
+      "disposition": "started"
+    }
+  },
+  "cancel_order": [
+    "clear_queue",
+    "abort_retry",
+    "abort"
+  ],
+  "session_reference": "task-a/run-a/session.jsonl",
+  "model_profiles": [
+    {
+      "provider": "xvan",
+      "baseUrl": "https://xvan.ai/v1",
+      "api": "openai-responses",
+      "model": "gpt-5.6-sol",
+      "credential_env": "NEW_API_KEY"
+    },
+    {
+      "provider": "local",
+      "baseUrl": "http://127.0.0.1:8001/v1",
+      "api": "openai-completions",
+      "model": "test-model",
+      "credential_env": "STUDIO_TEST_KEY"
+    }
+  ]
+}

@@ -1,0 +1,1356 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OpenMontage Studio v1",
+  "$defs": {
+    "TaskCreate": {
+      "additionalProperties": false,
+      "properties": {
+        "brief": {
+          "maxLength": 10000,
+          "minLength": 2,
+          "title": "Brief",
+          "type": "string"
+        },
+        "profile_id": {
+          "default": "xvan",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Profile Id",
+          "type": "string"
+        },
+        "duration_seconds": {
+          "default": 30,
+          "maximum": 600,
+          "minimum": 1,
+          "title": "Duration Seconds",
+          "type": "integer"
+        },
+        "aspect_ratio": {
+          "default": "16:9",
+          "enum": [
+            "16:9",
+            "9:16",
+            "1:1"
+          ],
+          "title": "Aspect Ratio",
+          "type": "string"
+        },
+        "narration": {
+          "default": false,
+          "title": "Narration",
+          "type": "boolean"
+        },
+        "budget_usd_micros": {
+          "default": 10000000,
+          "minimum": 0,
+          "title": "Budget Usd Micros",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "brief"
+      ],
+      "title": "TaskCreate",
+      "type": "object"
+    },
+    "ApprovalBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "task_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Task Id",
+          "type": "string"
+        },
+        "run_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "gate_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Gate Id",
+          "type": "string"
+        },
+        "checkpoint_revision": {
+          "minimum": 1,
+          "title": "Checkpoint Revision",
+          "type": "integer"
+        },
+        "checkpoint_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Checkpoint Sha256",
+          "type": "string"
+        },
+        "artifact_revision": {
+          "minimum": 1,
+          "title": "Artifact Revision",
+          "type": "integer"
+        },
+        "artifact_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Artifact Sha256",
+          "type": "string"
+        },
+        "scope_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Scope Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "run_id",
+        "gate_id",
+        "checkpoint_revision",
+        "checkpoint_sha256",
+        "artifact_revision",
+        "artifact_sha256",
+        "scope_sha256"
+      ],
+      "title": "ApprovalBinding",
+      "type": "object"
+    },
+    "ApprovalOption": {
+      "additionalProperties": false,
+      "properties": {
+        "option_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Option Id",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "maxLength": 2000,
+          "title": "Description",
+          "type": "string"
+        }
+      },
+      "required": [
+        "option_id",
+        "label"
+      ],
+      "title": "ApprovalOption",
+      "type": "object"
+    },
+    "ApprovalRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "binding": {
+          "$ref": "#/$defs/ApprovalBinding"
+        },
+        "stage": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Stage",
+          "type": "string"
+        },
+        "artifact": {
+          "$ref": "#/$defs/FileReference"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/FileReference"
+        },
+        "scope": {
+          "$ref": "#/$defs/ApprovalScope"
+        },
+        "summary": {
+          "maxLength": 20000,
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/$defs/ApprovalOption"
+          },
+          "maxItems": 100,
+          "title": "Options",
+          "type": "array"
+        },
+        "status": {
+          "default": "pending",
+          "enum": [
+            "pending",
+            "approved",
+            "revised",
+            "rejected",
+            "aborted",
+            "superseded"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "binding",
+        "stage",
+        "artifact",
+        "checkpoint",
+        "scope",
+        "summary"
+      ],
+      "title": "ApprovalRequest",
+      "type": "object"
+    },
+    "ApprovalScope": {
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Provider",
+          "type": "string"
+        },
+        "model": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "render_runtime": {
+          "anyOf": [
+            {
+              "enum": [
+                "ffmpeg",
+                "remotion",
+                "hyperframes"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Render Runtime"
+        },
+        "budget_usd_micros": {
+          "minimum": 0,
+          "title": "Budget Usd Micros",
+          "type": "integer"
+        },
+        "configuration_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Configuration Sha256",
+          "type": "string"
+        },
+        "media_models": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Media Models",
+          "type": "object"
+        },
+        "narration": {
+          "default": false,
+          "title": "Narration",
+          "type": "boolean"
+        },
+        "unknown_price": {
+          "default": false,
+          "title": "Unknown Price",
+          "type": "boolean"
+        },
+        "authorized_limit_usd_micros": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Authorized Limit Usd Micros"
+        }
+      },
+      "required": [
+        "provider",
+        "model",
+        "budget_usd_micros",
+        "configuration_sha256"
+      ],
+      "title": "ApprovalScope",
+      "type": "object"
+    },
+    "ConfigSnapshot": {
+      "additionalProperties": false,
+      "description": "Non-secret immutable selection. Credentials/headers/endpoints stay backend-only.",
+      "properties": {
+        "profile_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Profile Id",
+          "type": "string"
+        },
+        "provider": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Provider",
+          "type": "string"
+        },
+        "model": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "api": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Api",
+          "type": "string"
+        },
+        "configuration_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Configuration Sha256",
+          "type": "string"
+        },
+        "media_configuration_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Media Configuration Sha256"
+        },
+        "budget_usd_micros": {
+          "default": 10000000,
+          "minimum": 0,
+          "title": "Budget Usd Micros",
+          "type": "integer"
+        },
+        "single_action_approval_usd_micros": {
+          "default": 500000,
+          "minimum": 0,
+          "title": "Single Action Approval Usd Micros",
+          "type": "integer"
+        },
+        "max_output_tokens": {
+          "default": 16384,
+          "minimum": 1,
+          "title": "Max Output Tokens",
+          "type": "integer"
+        },
+        "max_turns": {
+          "default": 100,
+          "minimum": 1,
+          "title": "Max Turns",
+          "type": "integer"
+        },
+        "task_timeout_seconds": {
+          "default": 3600,
+          "minimum": 1,
+          "title": "Task Timeout Seconds",
+          "type": "integer"
+        },
+        "media_models": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Media Models",
+          "type": "object"
+        },
+        "price_status": {
+          "default": "unquoted",
+          "enum": [
+            "quoted",
+            "unquoted"
+          ],
+          "title": "Price Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile_id",
+        "provider",
+        "model",
+        "api",
+        "configuration_sha256"
+      ],
+      "title": "ConfigSnapshot",
+      "type": "object"
+    },
+    "CostSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "currency": {
+          "const": "USD",
+          "default": "USD",
+          "title": "Currency",
+          "type": "string"
+        },
+        "budget_usd_micros": {
+          "default": 10000000,
+          "minimum": 0,
+          "title": "Budget Usd Micros",
+          "type": "integer"
+        },
+        "reserved_usd_micros": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Reserved Usd Micros",
+          "type": "integer"
+        },
+        "spent_usd_micros": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Spent Usd Micros",
+          "type": "integer"
+        },
+        "unknown_call_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Unknown Call Count",
+          "type": "integer"
+        },
+        "price_status": {
+          "default": "unquoted",
+          "enum": [
+            "quoted",
+            "unquoted"
+          ],
+          "title": "Price Status",
+          "type": "string"
+        }
+      },
+      "title": "CostSnapshot",
+      "type": "object"
+    },
+    "ErrorDTO": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "invalid_input",
+            "not_found",
+            "profile_unavailable",
+            "dependency_unavailable",
+            "version_conflict",
+            "idempotency_conflict",
+            "state_conflict",
+            "approval_conflict",
+            "fence_conflict",
+            "budget_exceeded",
+            "quote_required",
+            "outcome_unknown",
+            "file_conflict",
+            "invalid_artifact",
+            "cursor_expired",
+            "forbidden",
+            "rpc_error",
+            "timeout",
+            "internal_error"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "retryable": {
+          "default": false,
+          "title": "Retryable",
+          "type": "boolean"
+        },
+        "recovery_actions": {
+          "items": {
+            "enum": [
+              "refresh",
+              "resume",
+              "reconcile",
+              "cancel",
+              "configure"
+            ],
+            "type": "string"
+          },
+          "title": "Recovery Actions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "ErrorDTO",
+      "type": "object"
+    },
+    "FileReference": {
+      "additionalProperties": false,
+      "description": "Path is relative to the task project, never a client-supplied host path.",
+      "properties": {
+        "path": {
+          "pattern": "^[a-zA-Z0-9_-][a-zA-Z0-9_.-]*(?:/[a-zA-Z0-9_-][a-zA-Z0-9_.-]*)*$",
+          "title": "Path",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 1,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "revision",
+        "sha256"
+      ],
+      "title": "FileReference",
+      "type": "object"
+    },
+    "RenderResult": {
+      "additionalProperties": false,
+      "properties": {
+        "render_report": {
+          "$ref": "#/$defs/FileReference"
+        },
+        "video": {
+          "$ref": "#/$defs/FileReference"
+        },
+        "bytes": {
+          "exclusiveMinimum": 0,
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "duration_seconds": {
+          "exclusiveMinimum": 0,
+          "title": "Duration Seconds",
+          "type": "number"
+        },
+        "width": {
+          "exclusiveMinimum": 0,
+          "title": "Width",
+          "type": "integer"
+        },
+        "height": {
+          "exclusiveMinimum": 0,
+          "title": "Height",
+          "type": "integer"
+        },
+        "verified": {
+          "const": true,
+          "title": "Verified",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "render_report",
+        "video",
+        "bytes",
+        "duration_seconds",
+        "width",
+        "height",
+        "verified"
+      ],
+      "title": "RenderResult",
+      "type": "object"
+    },
+    "TaskState": {
+      "enum": [
+        "queued",
+        "running",
+        "awaiting_approval",
+        "blocked",
+        "cancel_requested",
+        "cancelled",
+        "succeeded",
+        "failed",
+        "recovery_required"
+      ],
+      "title": "TaskState",
+      "type": "string"
+    },
+    "TaskRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "task_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Task Id",
+          "type": "string"
+        },
+        "project_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "run_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/$defs/TaskState",
+          "default": "queued"
+        },
+        "request": {
+          "$ref": "#/$defs/TaskCreate"
+        },
+        "config_snapshot": {
+          "$ref": "#/$defs/ConfigSnapshot"
+        },
+        "current_stage": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Current Stage"
+        },
+        "approval": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalRequest"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "cost": {
+          "$ref": "#/$defs/CostSnapshot"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ErrorDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RenderResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "created_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created At"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Updated At"
+        }
+      },
+      "required": [
+        "task_id",
+        "project_id",
+        "run_id",
+        "request",
+        "config_snapshot"
+      ],
+      "title": "TaskRecord",
+      "type": "object",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "succeeded"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "$ref": "#/$defs/RenderResult"
+              }
+            },
+            "required": [
+              "result"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "awaiting_approval"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "approval": {
+                "$ref": "#/$defs/ApprovalRequest"
+              }
+            },
+            "required": [
+              "approval"
+            ]
+          }
+        }
+      ]
+    },
+    "ApprovalDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "binding": {
+          "$ref": "#/$defs/ApprovalBinding"
+        },
+        "decision": {
+          "enum": [
+            "approve",
+            "revise",
+            "reject",
+            "abort"
+          ],
+          "title": "Decision",
+          "type": "string"
+        },
+        "comment": {
+          "default": "",
+          "maxLength": 10000,
+          "title": "Comment",
+          "type": "string"
+        },
+        "selected_option_ids": {
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+            "type": "string"
+          },
+          "maxItems": 100,
+          "title": "Selected Option Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "expected_version",
+        "binding",
+        "decision"
+      ],
+      "title": "ApprovalDecision",
+      "type": "object"
+    },
+    "CancelRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "reason": {
+          "default": "User requested cancellation",
+          "maxLength": 2000,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_version"
+      ],
+      "title": "CancelRequest",
+      "type": "object"
+    },
+    "ResumeRequest": {
+      "additionalProperties": false,
+      "description": "Resume performs reconciliation first; it never authorizes a fresh paid submit.",
+      "properties": {
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "comment": {
+          "default": "",
+          "maxLength": 4000,
+          "title": "Comment",
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_version"
+      ],
+      "title": "ResumeRequest",
+      "type": "object"
+    },
+    "TaskCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "command_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Command Id",
+          "type": "string"
+        },
+        "task_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Task Id",
+          "type": "string"
+        },
+        "run_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "start",
+            "continue",
+            "revise",
+            "cancel",
+            "resume"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "idempotency_key": {
+          "maxLength": 128,
+          "minLength": 8,
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "title": "Idempotency Key",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": true,
+          "title": "Payload",
+          "type": "object"
+        },
+        "status": {
+          "default": "pending",
+          "enum": [
+            "pending",
+            "claimed",
+            "completed",
+            "failed"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command_id",
+        "task_id",
+        "run_id",
+        "kind",
+        "expected_version",
+        "idempotency_key"
+      ],
+      "title": "TaskCommand",
+      "type": "object"
+    },
+    "SessionReference": {
+      "additionalProperties": false,
+      "description": "Internal reference under .runtime/studio/sessions, never projects or public API.",
+      "properties": {
+        "path": {
+          "pattern": "^[a-zA-Z0-9_-][a-zA-Z0-9_.-]*(?:/[a-zA-Z0-9_-][a-zA-Z0-9_.-]*)*$",
+          "title": "Path",
+          "type": "string"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Session Id"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "SessionReference",
+      "type": "object"
+    },
+    "RunContext": {
+      "additionalProperties": false,
+      "properties": {
+        "task_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Task Id",
+          "type": "string"
+        },
+        "project_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "run_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "attempt": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "fence": {
+          "minimum": 1,
+          "title": "Fence",
+          "type": "integer"
+        },
+        "config_snapshot": {
+          "$ref": "#/$defs/ConfigSnapshot"
+        },
+        "session": {
+          "$ref": "#/$defs/SessionReference"
+        }
+      },
+      "required": [
+        "task_id",
+        "project_id",
+        "run_id",
+        "fence",
+        "config_snapshot",
+        "session"
+      ],
+      "title": "RunContext",
+      "type": "object"
+    },
+    "StudioEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "minimum": 1,
+          "title": "Event Id",
+          "type": "integer"
+        },
+        "task_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Task Id",
+          "type": "string"
+        },
+        "run_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "task_version": {
+          "minimum": 1,
+          "title": "Task Version",
+          "type": "integer"
+        },
+        "type": {
+          "enum": [
+            "state",
+            "stage",
+            "approval",
+            "progress",
+            "cost",
+            "error",
+            "result",
+            "recovery"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "data": {
+          "additionalProperties": true,
+          "title": "Data",
+          "type": "object"
+        },
+        "created_at": {
+          "title": "Created At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "task_id",
+        "run_id",
+        "task_version",
+        "type",
+        "created_at"
+      ],
+      "title": "StudioEvent",
+      "type": "object"
+    },
+    "CallIntent": {
+      "additionalProperties": false,
+      "properties": {
+        "call_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Call Id",
+          "type": "string"
+        },
+        "task_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Task Id",
+          "type": "string"
+        },
+        "run_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "fence": {
+          "minimum": 1,
+          "title": "Fence",
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "model",
+            "tool"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "operation": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Operation",
+          "type": "string"
+        },
+        "provider": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Provider",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "request_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Request Sha256",
+          "type": "string"
+        },
+        "price_status": {
+          "enum": [
+            "quoted",
+            "unquoted"
+          ],
+          "title": "Price Status",
+          "type": "string"
+        },
+        "reserved_usd_micros": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reserved Usd Micros"
+        },
+        "actual_usd_micros": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actual Usd Micros"
+        },
+        "status": {
+          "default": "prepared",
+          "enum": [
+            "reserved",
+            "prepared",
+            "submitted",
+            "receipted",
+            "settled",
+            "failed",
+            "outcome_unknown"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "external_job_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "External Job Id"
+        },
+        "resume_reference": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resume Reference"
+        },
+        "usage": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Usage",
+          "type": "object"
+        }
+      },
+      "required": [
+        "call_id",
+        "task_id",
+        "run_id",
+        "fence",
+        "kind",
+        "operation",
+        "provider",
+        "request_sha256",
+        "price_status"
+      ],
+      "title": "CallIntent",
+      "type": "object",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "outcome_unknown"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "actual_usd_micros": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "FileWriteIntent": {
+      "additionalProperties": false,
+      "properties": {
+        "intent_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Intent Id",
+          "type": "string"
+        },
+        "task_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Task Id",
+          "type": "string"
+        },
+        "run_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "fence": {
+          "minimum": 1,
+          "title": "Fence",
+          "type": "integer"
+        },
+        "target": {
+          "$ref": "#/$defs/FileReference"
+        },
+        "previous_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Previous Sha256"
+        },
+        "status": {
+          "default": "prepared",
+          "enum": [
+            "prepared",
+            "applied",
+            "reconciled",
+            "conflict"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "intent_id",
+        "task_id",
+        "run_id",
+        "fence",
+        "target"
+      ],
+      "title": "FileWriteIntent",
+      "type": "object"
+    },
+    "ToolCall": {
+      "additionalProperties": false,
+      "properties": {
+        "call_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Call Id",
+          "type": "string"
+        },
+        "context": {
+          "$ref": "#/$defs/RunContext"
+        },
+        "tool_name": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "inputs": {
+          "additionalProperties": true,
+          "title": "Inputs",
+          "type": "object"
+        },
+        "approval_binding": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalBinding"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "call_id",
+        "context",
+        "tool_name"
+      ],
+      "title": "ToolCall",
+      "type": "object"
+    },
+    "ToolReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "call_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Call Id",
+          "type": "string"
+        },
+        "success": {
+          "title": "Success",
+          "type": "boolean"
+        },
+        "data": {
+          "additionalProperties": true,
+          "title": "Data",
+          "type": "object"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ErrorDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "cost": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CostSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "call_id",
+        "success"
+      ],
+      "title": "ToolReceipt",
+      "type": "object"
+    }
+  }
+}

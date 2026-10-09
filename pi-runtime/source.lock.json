@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/earendil-works/pi",
+  "tag": "v1.1.0",
+  "commit": "abe508e1b89912adde45528136c3221eb69acdd7",
+  "version": "1.1.0",
+  "node_minimum": "22.19.0",
+  "source_url": "https://github.com/earendil-works/pi/releases/download/v1.1.0/pi-1.1.0-source.tar.gz",
+  "source_sha256": "63b17b48b855e36e64c5013523acd48131ffcfa90ae48fe2f3e6fa9fe3d0da32",
+  "package_lock_sha256": "4694eb371dcc1ee9812c7bdcdfb01d6ddcf2fb3ef18c2640d0d5a6100e8b9b00",
+  "package": "@earendil-works/pi-coding-agent",
+  "build": "npm ci --ignore-scripts && npm run build:offline",
+  "cli": "packages/coding-agent/dist/bundle/cli.js"
+}
