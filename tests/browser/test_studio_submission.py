@@ -85,6 +85,32 @@ def test_browser_creates_a_durable_task_once_and_refresh_does_not_submit_again()
         expect(page.locator("#current-task a[href^='/p/']")).to_be_visible()
 
 
+@pytest.mark.parametrize("delayed_path", ["/api/studio/config", "/api/studio/tasks"])
+def test_ready_form_submits_once_during_slow_config_or_task_list_initialization(delayed_path):
+    with isolated_repository() as repo, studio_browser(repo) as (page, base_url):
+        pending = []
+        def hold_initial_read(route):
+            if route.request.method == "GET" and not pending:
+                pending.append(route)
+            else:
+                route.continue_()
+        page.route("**" + delayed_path, hold_initial_read)
+        with page.expect_request(base_url + delayed_path):
+            page.goto(base_url + "/studio")
+        if delayed_path == "/api/studio/config":
+            expect(page.locator("#create-task")).to_be_disabled(timeout=1000)
+            pending[0].continue_()
+        page.locator("#brief").fill("A lighthouse after slow Studio initialization")
+        with page.expect_response(lambda response: response.url == base_url + "/api/studio/tasks"
+                                  and response.request.method == "POST", timeout=5000) as submitted:
+            page.locator("#create-task").click()
+        assert submitted.value.status == 202
+        if delayed_path == "/api/studio/tasks":
+            pending[0].continue_()
+        expect(page.locator("#current-task")).to_contain_text("Queued")
+        assert len(repo.list_tasks()) == 1
+
+
 def test_lost_create_response_reuses_the_saved_key_after_reload_and_mobile_layout_fits():
     with isolated_repository() as repo, studio_browser(repo, viewport={"width": 390, "height": 844}) as (page, base_url):
         keys = []

@@ -139,6 +139,20 @@ async function initializeStudio() {
     stream = subscribeTask(taskId, () => refresh().catch((error) => announce(error.message, true)));
     await refresh();
   }
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault(); if (submitting || !config?.ready || !form.reportValidity()) return;
+    submitting = true; profileInfo(); form.setAttribute("aria-busy", "true");
+    try {
+      const task = await studioAction("/api/studio/tasks", {
+        brief: document.getElementById("brief").value.trim(), profile_id: profileSelect.value,
+        duration_seconds: Number(document.getElementById("duration").value), aspect_ratio: document.getElementById("aspect-ratio").value,
+        narration: document.getElementById("narration").checked,
+        budget_usd_micros: Math.round(Number(document.getElementById("budget").value) * 1_000_000),
+      });
+      announce("Task queued. Open its board to review the production."); await selectTask(task.task_id);
+    } catch (error) { announce(error.message, true); }
+    finally { submitting = false; profileInfo(); form.setAttribute("aria-busy", "false"); }
+  });
   try {
     config = await studioConfig();
     for (const profile of config.profiles) {
@@ -166,19 +180,5 @@ async function initializeStudio() {
     const savedId = new URLSearchParams(location.search).get("task") || localStorage.getItem("backlot.studio.last-task");
     if (savedId) await selectTask(savedId);
   } catch (error) { announce(error.message, true); }
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault(); if (submitting || !form.reportValidity()) return;
-    submitting = true; profileInfo(); form.setAttribute("aria-busy", "true");
-    try {
-      const task = await studioAction("/api/studio/tasks", {
-        brief: document.getElementById("brief").value.trim(), profile_id: profileSelect.value,
-        duration_seconds: Number(document.getElementById("duration").value), aspect_ratio: document.getElementById("aspect-ratio").value,
-        narration: document.getElementById("narration").checked,
-        budget_usd_micros: Math.round(Number(document.getElementById("budget").value) * 1_000_000),
-      });
-      announce("Task queued. Open its board to review the production."); await selectTask(task.task_id);
-    } catch (error) { announce(error.message, true); }
-    finally { submitting = false; profileInfo(); form.setAttribute("aria-busy", "false"); }
-  });
   window.addEventListener("pagehide", () => stream?.close());
 }

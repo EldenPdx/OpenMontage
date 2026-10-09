@@ -144,7 +144,11 @@ class ProductionToolBridge:
         for process in jobs:
             process.join(max(0, deadline - time.monotonic()))
         from production.recovery import _group_exists
-        return all(not process.is_alive() and not _group_exists(process.pid) for process in jobs)
+        while True:
+            stopped = all(not process.is_alive() and not _group_exists(process.pid) for process in jobs)
+            if stopped or time.monotonic() >= deadline:
+                return stopped
+            time.sleep(0.02)
 
     def _capture_job(self, tool, inputs, call):
         if call.call_id in self.captured_jobs:

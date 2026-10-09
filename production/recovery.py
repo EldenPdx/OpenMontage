@@ -67,9 +67,33 @@ def record_process(runtime_root, context, runner):
 def _group_exists(pgid):
     try:
         os.killpg(pgid, 0)
-        return True
     except ProcessLookupError:
         return False
+    except PermissionError:
+        return True
+    try:
+        result = subprocess.run(["ps", "-eo", "pgid=,stat="], capture_output=True, text=True, timeout=1)
+    except (OSError, subprocess.TimeoutExpired):
+        return True
+    if result.returncode:
+        return True
+    members = []
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if len(fields) != 2 or not fields[0].isdigit():
+            return True
+        if int(fields[0]) == pgid:
+            members.append(fields[1])
+    if members:
+        # Linux keeps a numeric process group until init reaps its terminated members.
+        return any(not state.startswith(("Z", "X")) for state in members)
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass
+    return True
 
 
 def confirm_process_exit(record, context, runtime_root):
