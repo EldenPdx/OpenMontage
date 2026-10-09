@@ -62,7 +62,7 @@ Task states are distinct from checkpoint states (`in_progress`, `awaiting_human`
 | --- | --- |
 | queued | running, cancel_requested, blocked |
 | running | awaiting_approval, blocked, cancel_requested, succeeded, failed, recovery_required |
-| awaiting_approval | queued, cancel_requested, recovery_required |
+| awaiting_approval | queued, blocked, cancel_requested, recovery_required |
 | blocked | queued, cancel_requested, recovery_required |
 | cancel_requested | cancelled, failed, recovery_required |
 | recovery_required | queued, cancel_requested, failed |

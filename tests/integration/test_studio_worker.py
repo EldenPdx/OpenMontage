@@ -232,3 +232,63 @@ async def test_only_pre_prompt_startup_is_retried_and_model_posts_once(repositor
         assert len(attempts) == retries + 1
         assert len(requests) == expected_requests
         assert result.state == (TaskState.BLOCKED if retries else TaskState.FAILED)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("evidence", ["corrupt", "missing_after_run"])
+async def test_invalid_active_time_evidence_is_not_reset_or_sent_to_model(repository, tmp_path, evidence):
+    require_pi()
+    from production.worker import Worker
+
+    with model_server() as (url, requests):
+        config = local_config(url)
+        request = TaskCreate(brief="A local timer recovery", profile_id="local")
+        task = repository.create_task(request, snapshot_for(config.profiles["local"], request), "worker-bad-counter")
+        worker = Worker(repository, config, tmp_path / "runtime", tmp_path / "projects", environment={"STUDIO_LOCAL_KEY": "local-only-test-key"})
+        counter = tmp_path / "runtime/runs" / task.task_id / task.run_id / "active-time.json"
+        if evidence == "corrupt":
+            counter.parent.mkdir(parents=True)
+            counter.write_text("{")
+        else:
+            blocked = await worker.run_once()
+            counter.unlink()
+            repository.enqueue_command(TaskCommand(command_id="resume-missing-counter", task_id=task.task_id, run_id=task.run_id, kind="resume", expected_version=blocked.version, idempotency_key="missing-counter-client"))
+        result = await worker.run_once()
+        assert result.state == TaskState.RECOVERY_REQUIRED
+        assert result.error.code == "file_conflict"
+        assert len(requests) == (1 if evidence == "missing_after_run" else 0)
+        if evidence == "corrupt":
+            assert counter.read_text() == "{"
+        else:
+            assert not counter.exists()
+
+
+@pytest.mark.asyncio
+async def test_slow_repository_does_not_block_worker_event_loop(repository, tmp_path, monkeypatch):
+    import asyncio
+    require_pi()
+    from production.worker import Worker
+
+    entered, release = threading.Event(), threading.Event()
+    original_get = repository.get_task
+    observed = []
+
+    def delayed_get(task_id):
+        if not entered.is_set():
+            entered.set()
+            observed.append(release.wait(timeout=1))
+        return original_get(task_id)
+
+    with model_server() as (url, requests):
+        config = local_config(url)
+        request = TaskCreate(brief="A local responsive worker", profile_id="local")
+        repository.create_task(request, snapshot_for(config.profiles["local"], request), "worker-slow-repository")
+        monkeypatch.setattr(repository, "get_task", delayed_get)
+        worker = Worker(repository, config, tmp_path / "runtime", tmp_path / "projects", environment={"STUDIO_LOCAL_KEY": "local-only-test-key"})
+        execution = asyncio.create_task(worker.run_once())
+        assert await asyncio.to_thread(entered.wait, 3)
+        release.set()
+        result = await execution
+        assert observed == [True]
+        assert result.state == TaskState.BLOCKED
+        assert len(requests) == 1

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from decimal import Decimal
 import json
 import math
 import os
@@ -23,7 +24,13 @@ def load_studio_config(config_path: Path | None = None, *, environment: Mapping[
     """Defaults < trusted YAML < explicit backend enable/profile environment overrides."""
     environment = os.environ if environment is None else environment
     try:
-        values = OpenMontageConfig.load(config_path).studio.model_dump(mode="json")
+        runtime = OpenMontageConfig.load(config_path)
+        values = runtime.studio.model_dump(mode="json")
+        if "single_action_approval_usd_micros" not in runtime.studio.model_fields_set:
+            threshold = Decimal(str(runtime.budget.single_action_approval_usd)) * 1_000_000
+            if not threshold.is_finite() or threshold < 0 or threshold != threshold.to_integral_value():
+                raise ValueError("Action threshold must use nonnegative whole USD micros")
+            values["single_action_approval_usd_micros"] = int(threshold)
         if "STUDIO_ENABLED" in environment:
             setting = environment["STUDIO_ENABLED"].lower()
             if setting not in {"true", "false", "1", "0"}:
@@ -48,12 +55,13 @@ class ManagedPiConfig:
 
 
 def snapshot_for(profile: PiProfile, request: TaskCreate, *, media_models: Mapping[str, str] | None = None,
-                 media_configuration_sha256: str | None = None) -> ConfigSnapshot:
+                 media_configuration_sha256: str | None = None, single_action_approval_usd_micros: int = 500_000) -> ConfigSnapshot:
     return ConfigSnapshot(
         profile_id=request.profile_id, provider=profile.provider, model=profile.model, api=profile.api,
         configuration_sha256=canonical_sha256(profile.model_dump(mode="json")),
         media_configuration_sha256=media_configuration_sha256,
         budget_usd_micros=request.budget_usd_micros, max_output_tokens=profile.max_output_tokens,
+        single_action_approval_usd_micros=single_action_approval_usd_micros,
         max_turns=profile.max_turns, task_timeout_seconds=math.ceil(profile.task_timeout_seconds),
         media_models=dict(media_models or {}), price_status="quoted" if profile.price is not None else "unquoted",
     )

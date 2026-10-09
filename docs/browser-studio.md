@@ -190,6 +190,12 @@ Reservations are estimates, not a hard limit on gateway charges. Received result
 with unquoted fees retain their holds and display **Unquoted**, rather than zero.
 Only trusted billing reconciliation may settle those holds.
 
+The single-action threshold follows `budget.single_action_approval_usd` by default.
+A trusted `studio.single_action_approval_usd_micros` override takes precedence.
+The selected threshold is frozen in each task snapshot; browser requests cannot
+replace it. Reject blocks the current plan and preserves the task for a revised
+attempt; Stop/abort requests cancellation.
+
 Cancel prevents new calls, clears Pi's queued messages and stops its managed
 process group and tool processes. A submitted cloud job may continue and charge;
 cancelling locally does not promise a remote refund. Durable external job receipts

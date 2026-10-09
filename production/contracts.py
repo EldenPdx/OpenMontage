@@ -66,7 +66,7 @@ ALLOWED_TRANSITIONS = {
         TaskState.SUCCEEDED, TaskState.FAILED, TaskState.RECOVERY_REQUIRED,
     },
     TaskState.AWAITING_APPROVAL: {
-        TaskState.QUEUED, TaskState.CANCEL_REQUESTED, TaskState.RECOVERY_REQUIRED,
+        TaskState.QUEUED, TaskState.BLOCKED, TaskState.CANCEL_REQUESTED, TaskState.RECOVERY_REQUIRED,
     },
     TaskState.BLOCKED: {
         TaskState.QUEUED, TaskState.CANCEL_REQUESTED, TaskState.RECOVERY_REQUIRED,

@@ -46,7 +46,7 @@ def test_instruction_reads_include_layer_three_but_exclude_credentials(tmp_path)
             policy.instruction_path(name)
 
 
-def test_existing_cli_cannot_write_an_active_studio_project(tmp_path):
+def test_existing_cli_cannot_write_an_active_studio_project(tmp_path, monkeypatch):
     from lib.checkpoint import CheckpointValidationError, init_project
     project = tmp_path / "owned"
     project.mkdir()
@@ -64,6 +64,15 @@ def test_existing_cli_cannot_write_an_active_studio_project(tmp_path):
     from tools.cost_tracker import CostTracker
     with pytest.raises(CheckpointValidationError, match="Studio"):
         CostTracker(cost_log_path=project / "cost_log.json").estimate("image", "generate", 1)
+    class DefaultCLIWriter(BaseTool):
+        name = "default_cli_writer"
+        def execute(self, inputs):
+            Path("default.mp4").write_bytes(b"unapproved default output")
+            return ToolResult(success=True)
+    monkeypatch.chdir(project)
+    with pytest.raises(CheckpointValidationError, match="Studio"):
+        DefaultCLIWriter().execute({})
+    assert not (project / "default.mp4").exists()
 
 
 def test_render_asset_ids_resolve_to_their_owned_media_paths(tmp_path):

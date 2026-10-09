@@ -51,7 +51,8 @@ class PostgresRepository:
     @contextmanager
     def _connection(self):
         try:
-            connection = psycopg.connect(self._dsn, row_factory=dict_row)
+            connection = psycopg.connect(self._dsn, row_factory=dict_row, connect_timeout=5,
+                                         options="-c statement_timeout=5000 -c lock_timeout=5000")
             with connection:
                 connection.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(self.schema)))
                 yield connection
@@ -314,10 +315,16 @@ class PostgresRepository:
             status = {"approve": "approved", "revise": "revised", "reject": "rejected", "abort": "aborted"}[decision.decision]
             connection.execute("UPDATE gates SET status=%s,decision=%s,consumed=true WHERE task_id=%s AND run_id=%s AND gate_id=%s", (status, _json(decision), task_id, task.run_id, decision.binding.gate_id))
             approval = task.approval.model_copy(update={"status": status})
-            target = TaskState.QUEUED if decision.decision in {"approve", "revise"} else TaskState.CANCEL_REQUESTED
-            task = self._change(connection, task, target, {"approval": approval.model_dump(mode="json")})
-            kind = "continue" if decision.decision == "approve" else "revise" if decision.decision == "revise" else "cancel"
-            self._insert_command(connection, TaskCommand(command_id="cmd-" + uuid4().hex, task_id=task_id, run_id=task.run_id, kind=kind, expected_version=task.version, idempotency_key=idempotency_key, payload={"gate_id": decision.binding.gate_id, "decision": decision.model_dump(mode="json")}))
+            updates = {"approval": approval.model_dump(mode="json")}
+            if decision.decision == "reject":
+                target = TaskState.BLOCKED
+                updates["error"] = ErrorDTO(code="approval_conflict", message="This plan was rejected. Resume to revise it and request fresh approval.", recovery_actions=["resume"]).model_dump(mode="json")
+            else:
+                target = TaskState.QUEUED if decision.decision in {"approve", "revise"} else TaskState.CANCEL_REQUESTED
+            task = self._change(connection, task, target, updates)
+            if decision.decision != "reject":
+                kind = "continue" if decision.decision == "approve" else "revise" if decision.decision == "revise" else "cancel"
+                self._insert_command(connection, TaskCommand(command_id="cmd-" + uuid4().hex, task_id=task_id, run_id=task.run_id, kind=kind, expected_version=task.version, idempotency_key=idempotency_key, payload={"gate_id": decision.binding.gate_id, "decision": decision.model_dump(mode="json")}))
             self._event(connection, task, "approval", {"gate_id": decision.binding.gate_id, "status": status})
             connection.execute("INSERT INTO requests VALUES (%s,%s,%s,%s)", ("decision:" + task_id, idempotency_key, fingerprint, _json(task)))
             return task

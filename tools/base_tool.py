@@ -170,6 +170,7 @@ def _instrument_execute(fn: Callable) -> Callable:
     def wrapper(self, inputs: Any, *args: Any, **kwargs: Any):
         # Ownership is enforced before the optional, non-fatal event layer.
         from lib.checkpoint import check_studio_tool_writer
+        check_studio_tool_writer({"project_dir": Path.cwd()})
         check_studio_tool_writer(inputs)
         # Event layer is fully optional: if it can't import, run untouched.
         try:

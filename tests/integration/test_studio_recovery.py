@@ -17,8 +17,8 @@ from tests.integration.test_studio_worker import local_config
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mismatched_identity", [False, True])
-async def test_recovery_stops_original_real_pi_and_preserves_known_job_without_post(repository, tmp_path, mismatched_identity):
+@pytest.mark.parametrize("mismatched_identity,handoff", [(False, "normal"), (True, "normal"), (False, "failure"), (False, "new_record")])
+async def test_recovery_stops_original_real_pi_and_preserves_known_job_without_post(repository, tmp_path, monkeypatch, mismatched_identity, handoff):
     require_pi()
     from production.recovery import RecoveryService
 
@@ -51,7 +51,26 @@ async def test_recovery_stops_original_real_pi_and_preserves_known_job_without_p
                     assert (await runner.inspect())["sessionId"] == session.session_id
                     assert repository.claim_command("another-worker") is None
                     write_private(ownership_path, original_record)
+                original_release = repository.release_recovered_lease
+                replacement = {**original_record, "fence": context.fence + 2, "start": "new active writer"}
+
+                def handoff_callback(*args, **kwargs):
+                    if handoff == "failure":
+                        from production.contracts import ContractViolation
+                        raise ContractViolation("Injected database handoff failure", "dependency_unavailable")
+                    original_release(*args, **kwargs)
+                    write_private(ownership_path, replacement)
+
+                if handoff in {"failure", "new_record"}:
+                    monkeypatch.setattr(repository, "release_recovered_lease", handoff_callback)
+                if handoff == "failure":
+                    assert await service.recover() == 0
+                    assert not ownership_path.exists()
+                    assert list(ownership_path.parent.glob("*recovering*"))
+                    monkeypatch.setattr(repository, "release_recovered_lease", original_release)
                 assert await service.recover() == 1
+                if handoff == "new_record":
+                    assert json.loads(ownership_path.read_text()) == replacement
                 await asyncio.wait_for(runner.process.wait(), 5)
                 assert runner.returncode is not None
                 recovering = repository.get_task(task.task_id)

@@ -3,6 +3,7 @@
 import asyncio
 from contextlib import suppress
 import json
+import math
 import os
 from pathlib import Path
 import time
@@ -59,12 +60,16 @@ class Worker:
                 return error
         raise ContractViolation("Pi exited before settling", "rpc_error")
 
-    def _transition(self, context, state, *, updates=None):
-        task = self.repository.get_task(context.task_id)
-        return self.repository.transition(task.task_id, state, expected_version=task.version, fence=context.fence, updates=updates)
+    async def _db(self, method, *args, **kwargs):
+        return await asyncio.to_thread(method, *args, **kwargs)
 
-    def _has_unknown_submit(self, task_id):
-        return any(isinstance(intent, CallIntent) and intent.status in {"prepared", "reserved", "submitted", "outcome_unknown"} and not intent.external_job_id for intent in self.repository.unresolved_intents(task_id))
+    async def _transition(self, context, state, *, updates=None):
+        task = await self._db(self.repository.get_task, context.task_id)
+        return await self._db(self.repository.transition, task.task_id, state, expected_version=task.version, fence=context.fence, updates=updates)
+
+    async def _has_unknown_submit(self, task_id):
+        intents = await self._db(self.repository.unresolved_intents, task_id)
+        return any(isinstance(intent, CallIntent) and intent.status in {"prepared", "reserved", "submitted", "outcome_unknown"} and not intent.external_job_id for intent in intents)
 
     async def _keep_lease(self, claim):
         while True:
@@ -73,13 +78,13 @@ class Worker:
 
     async def _stop_tools(self, bridge, context):
         if not await asyncio.to_thread(bridge.stop):
-            task = self.repository.get_task(context.task_id)
+            task = await self._db(self.repository.get_task, context.task_id)
             if task.state in {TaskState.RUNNING, TaskState.AWAITING_APPROVAL, TaskState.CANCEL_REQUESTED}:
-                self._transition(context, TaskState.RECOVERY_REQUIRED, updates={"error": ErrorDTO(code="fence_conflict", message="Managed tool writers have not confirmed exit; execution ownership remains held", recovery_actions=["reconcile"])})
+                await self._transition(context, TaskState.RECOVERY_REQUIRED, updates={"error": ErrorDTO(code="fence_conflict", message="Managed tool writers have not confirmed exit; execution ownership remains held", recovery_actions=["reconcile"])})
             raise ContractViolation("Managed tool writers have not confirmed exit", "fence_conflict")
 
     async def run_once(self):
-        claim = self.repository.claim_command(self.worker_id)
+        claim = await self._db(self.repository.claim_command, self.worker_id)
         if claim is None:
             return None
         context = claim.context
@@ -87,13 +92,24 @@ class Worker:
         started = time.monotonic()
         error = None
         active_time_path = self.runtime_root / "runs" / context.task_id / context.run_id / "active-time.json"
-        previous_time = json.loads(active_time_path.read_text()).get("seconds", 0) if active_time_path.exists() else 0
+        previous_time, valid_time = 0, False
         try:
-            task = self.repository.get_task(context.task_id)
+            task = await self._db(self.repository.get_task, context.task_id)
             if task.state == TaskState.CANCEL_REQUESTED:
-                return self._transition(context, TaskState.CANCELLED)
-            task = self._transition(context, TaskState.RUNNING, updates={"error": None})
+                return await self._transition(context, TaskState.CANCELLED)
+            task = await self._transition(context, TaskState.RUNNING, updates={"error": None})
             lease_keeper = asyncio.create_task(self._keep_lease(claim))
+            try:
+                if active_time_path.exists():
+                    evidence = json.loads(active_time_path.read_text())
+                    previous_time = evidence["seconds"]
+                    if isinstance(previous_time, bool) or not isinstance(previous_time, (int, float)) or not math.isfinite(previous_time) or previous_time < 0:
+                        raise ValueError("Invalid active-time counter")
+                elif context.fence > 2 or context.session.session_id is not None:
+                    raise ValueError("Required active-time counter is missing")
+                valid_time = True
+            except (OSError, ValueError, KeyError, TypeError):
+                raise ContractViolation("Private active-time evidence is missing or invalid; reconcile before execution", "file_conflict") from None
             from lib.checkpoint import CheckpointValidationError, StudioProjectLease
             project = self.projects_dir / context.project_id
             if project.resolve() != project:
@@ -106,14 +122,14 @@ class Worker:
             remaining = profile.task_timeout_seconds - previous_time
             if remaining <= 0:
                 raise ContractViolation("Task active execution time limit reached", "timeout")
-            bridge = ProductionToolBridge(self.repository, self.projects_dir, model_profile=profile,
-                                          registry=self.registry, tool_quotes=self.tool_quotes, runtime_root=self.runtime_root)
-            bridge.bind(context)
+            bridge = await asyncio.to_thread(ProductionToolBridge, self.repository, self.projects_dir, model_profile=profile,
+                                             registry=self.registry, tool_quotes=self.tool_quotes, runtime_root=self.runtime_root)
+            await asyncio.to_thread(bridge.bind, context)
             if claim.command.kind == "continue":
-                bridge.apply_approval(context)
-            server = BridgeServer(bridge, context, profile)
-            managed = prepare_pi(profile, context, self.runtime_root, environment=self.environment,
-                                 trusted_extension=ROOT / "pi-runtime/extensions/openmontage.ts")
+                await asyncio.to_thread(bridge.apply_approval, context)
+            server = await asyncio.to_thread(BridgeServer, bridge, context, profile)
+            managed = await asyncio.to_thread(prepare_pi, profile, context, self.runtime_root, environment=self.environment,
+                                             trusted_extension=ROOT / "pi-runtime/extensions/openmontage.ts")
             for attempt in range(profile.max_retries + 1):
                 left = remaining - (time.monotonic() - started)
                 if left <= 0:
@@ -134,8 +150,8 @@ class Worker:
                         raise
                 if lease_keeper.done():
                     await lease_keeper
-            context = self.repository.bind_session(context, session)
-            record_process(self.runtime_root, context, runner)
+            context = await self._db(self.repository.bind_session, context, session)
+            await asyncio.to_thread(record_process, self.runtime_root, context, runner)
             observation = asyncio.create_task(self._settled(runner))
             if time.monotonic() - started >= remaining:
                 raise ContractViolation("Task active execution time limit reached", "timeout")
@@ -143,11 +159,11 @@ class Worker:
             while True:
                 if lease_keeper.done():
                     await lease_keeper
-                task = self.repository.get_task(context.task_id)
+                task = await self._db(self.repository.get_task, context.task_id)
                 if task.state == TaskState.CANCEL_REQUESTED:
                     await runner.close()
                     await self._stop_tools(bridge, context)
-                    return self._transition(context, TaskState.CANCELLED)
+                    return await self._transition(context, TaskState.CANCELLED)
                 if task.state == TaskState.AWAITING_APPROVAL:
                     with suppress(ContractViolation, asyncio.TimeoutError):
                         await asyncio.wait_for(asyncio.shield(observation), 2)
@@ -160,33 +176,33 @@ class Worker:
                 if observation.done():
                     failed = await observation
                     await self._stop_tools(bridge, context)
-                    if self._has_unknown_submit(context.task_id):
+                    if await self._has_unknown_submit(context.task_id):
                         raise ContractViolation("A submitted call has an unknown result", "outcome_unknown")
-                    result = self.service.completion(context, request=task.request)
+                    result = await asyncio.to_thread(self.service.completion, context, request=task.request)
                     if result is not None:
-                        return self._transition(context, TaskState.SUCCEEDED, updates={"result": result})
+                        return await self._transition(context, TaskState.SUCCEEDED, updates={"result": result})
                     code = "rpc_error" if failed else "invalid_artifact"
                     state = TaskState.FAILED if failed else TaskState.BLOCKED
-                    return self._transition(context, state, updates={"error": ErrorDTO(code=code, message="Pi settled without a verified canonical video or pending browser gate", recovery_actions=["resume"])})
+                    return await self._transition(context, state, updates={"error": ErrorDTO(code=code, message="Pi settled without a verified canonical video or pending browser gate", recovery_actions=["resume"])})
                 await asyncio.sleep(0.1)
         except (ContractViolation, asyncio.CancelledError) as failure:
             if isinstance(failure, asyncio.CancelledError):
                 error = ErrorDTO(code="rpc_error", message="Worker interrupted; resume the exact session", recovery_actions=["resume"])
             else:
                 error = ErrorDTO(code=failure.code, message=str(failure), recovery_actions=["reconcile", "resume"])
-            task = self.repository.get_task(context.task_id)
+            task = await self._db(self.repository.get_task, context.task_id)
             if task.state == TaskState.RUNNING:
-                state = TaskState.RECOVERY_REQUIRED if self._has_unknown_submit(context.task_id) or error.code in {"file_conflict", "outcome_unknown", "fence_conflict"} else TaskState.FAILED if error.code == "timeout" else TaskState.BLOCKED
-                self._transition(context, state, updates={"error": error})
+                state = TaskState.RECOVERY_REQUIRED if await self._has_unknown_submit(context.task_id) or error.code in {"file_conflict", "outcome_unknown", "fence_conflict"} else TaskState.FAILED if error.code == "timeout" else TaskState.BLOCKED
+                await self._transition(context, state, updates={"error": error})
             if isinstance(failure, asyncio.CancelledError):
                 raise
-            return self.repository.get_task(context.task_id)
+            return await self._db(self.repository.get_task, context.task_id)
         except Exception:
             error = ErrorDTO(code="internal_error", message="Worker failed; inspect private diagnostics and resume after reconciliation", recovery_actions=["reconcile", "resume"])
-            task = self.repository.get_task(context.task_id)
+            task = await self._db(self.repository.get_task, context.task_id)
             if task.state == TaskState.RUNNING:
-                self._transition(context, TaskState.RECOVERY_REQUIRED if self._has_unknown_submit(context.task_id) else TaskState.FAILED, updates={"error": error})
-            return self.repository.get_task(context.task_id)
+                await self._transition(context, TaskState.RECOVERY_REQUIRED if await self._has_unknown_submit(context.task_id) else TaskState.FAILED, updates={"error": error})
+            return await self._db(self.repository.get_task, context.task_id)
         finally:
             if runner is not None:
                 await runner.close()
@@ -199,7 +215,8 @@ class Worker:
             if lease_keeper is not None:
                 lease_keeper.cancel()
                 await asyncio.gather(lease_keeper, return_exceptions=True)
-            write_private(active_time_path, {"seconds": previous_time + time.monotonic() - started, "last_fence": context.fence})
+            if valid_time:
+                await asyncio.to_thread(write_private, active_time_path, {"seconds": previous_time + time.monotonic() - started, "last_fence": context.fence})
             if not tools_stopped:
                 if project_lease is not None:
                     self.held_leases[context.task_id] = project_lease
@@ -207,7 +224,7 @@ class Worker:
                 if project_lease is not None:
                     project_lease.close()
                 try:
-                    self.repository.finish_command(claim, error=error)
+                    await self._db(self.repository.finish_command, claim, error=error)
                 except ContractViolation:
                     # Keep the identity record if the database could not acknowledge exit.
                     pass

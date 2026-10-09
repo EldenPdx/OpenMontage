@@ -150,6 +150,52 @@ def test_approval_is_version_bound_consumed_once_and_requeues_atomically(reposit
     assert restarted.claim_command("worker-c") is None
 
 
+@pytest.mark.parametrize("decision_kind", ["reject", "abort"])
+def test_reject_blocks_without_cancel_and_abort_queues_cancel_preserving_fees(repository, repository_factory, decision_kind):
+    task = create(repository)
+    claim = repository.claim_command("worker-a")
+    repository.transition(task.task_id, TaskState.RUNNING, expected_version=task.version, fence=claim.context.fence)
+    spent = repository.reserve_call(intent_for(task, claim, "spent-media", 400_000))
+    repository.update_call(spent.model_copy(update={"status": "settled", "actual_usd_micros": 250_000}))
+    hold = repository.reserve_call(intent_for(task, claim, "held-media", 200_000))
+    repository.update_call(hold.model_copy(update={"status": "outcome_unknown"}))
+    running = repository.get_task(task.task_id)
+    gate = gate_for(running, claim)
+    awaiting = repository.put_gate(gate, expected_version=running.version, fence=claim.context.fence)
+    repository.finish_command(claim)
+    restarted = repository_factory()
+    decision = ApprovalDecision(expected_version=awaiting.version, binding=gate.binding, decision=decision_kind)
+    with pytest.raises(ContractViolation, match="version"):
+        restarted.decide_gate(decision.model_copy(update={"expected_version": awaiting.version - 1}), idempotency_key="stale-decision")
+    changed_binding = gate.binding.model_copy(update={"artifact_sha256": "e" * 64})
+    with pytest.raises(ContractViolation, match="Approval"):
+        restarted.decide_gate(decision.model_copy(update={"binding": changed_binding}), idempotency_key="wrong-artifact")
+    evidence = []
+    result = restarted.decide_gate(decision, idempotency_key="human-decision", validate_evidence=lambda task, current: evidence.append(current.binding))
+    assert result.state == (TaskState.BLOCKED if decision_kind == "reject" else TaskState.CANCEL_REQUESTED)
+    assert result.approval.status == ("rejected" if decision_kind == "reject" else "aborted")
+    assert result.approval.binding == gate.binding
+    assert result.cost == awaiting.cost
+    assert (result.cost.spent_usd_micros, result.cost.reserved_usd_micros, result.cost.unknown_call_count) == (250_000, 200_000, 1)
+    assert restarted.decide_gate(decision, idempotency_key="human-decision", validate_evidence=lambda task, current: evidence.append(current.binding)) == result
+    assert evidence == [gate.binding]
+    assert restarted.get_task(task.task_id) == result
+    assert restarted.approved_gate(task.task_id, gate.binding.gate_id) is None
+    with pytest.raises(ContractViolation, match="pending approval"):
+        restarted.decide_gate(decision.model_copy(update={"expected_version": result.version}), idempotency_key="decide-again")
+    if decision_kind == "reject":
+        assert result.error.code == "approval_conflict"
+        assert "resume" in result.error.recovery_actions
+        assert restarted.claim_command("worker-b") is None
+        assert restarted.pending_cancel(task.task_id) is None
+    else:
+        pending = restarted.claim_command("worker-b")
+        assert pending.command.kind == "cancel"
+        assert pending.command.payload["gate_id"] == gate.binding.gate_id
+        assert restarted.claim_command("worker-c") is None
+        restarted.finish_command(pending)
+
+
 def intent_for(task, claim, call_id, amount):
     return CallIntent(call_id=call_id, task_id=task.task_id, run_id=task.run_id, fence=claim.context.fence, kind="tool", operation="generate", provider="local", model="test-model", request_sha256="d" * 64, price_status="quoted", reserved_usd_micros=amount)
 

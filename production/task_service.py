@@ -8,6 +8,10 @@ import subprocess
 from production.contracts import ContractViolation, FileReference, RenderResult
 from production.policy import ToolPolicy
 
+CODEC_NAMES = {"libx264": "h264", "libx265": "hevc", "h265": "hevc", "libvpx": "vp8",
+               "libvpx-vp9": "vp9", "libaom-av1": "av1", "libsvtav1": "av1",
+               "libfdk_aac": "aac", "libmp3lame": "mp3", "libopus": "opus", "libvorbis": "vorbis"}
+
 
 def file_sha256(path):
     digest = sha256()
@@ -64,7 +68,18 @@ class TaskService:
                     raise ContractViolation("Canonical video is absent from managed renders", "invalid_artifact")
                 probe = subprocess.run(["ffprobe", "-v", "error", "-show_format", "-show_streams", "-of", "json", str(video)], capture_output=True, text=True, timeout=30, check=True)
                 data = json.loads(probe.stdout)
+                if output["format"] != "mp4" or video.suffix.lower() != ".mp4" or "mp4" not in data["format"].get("format_name", "").split(","):
+                    raise ContractViolation("Studio delivery requires an actual MP4 matching the canonical report", "invalid_artifact")
                 stream = next(item for item in data["streams"] if item["codec_type"] == "video")
+                if "codec" in output:
+                    declared = output["codec"].strip().lower()
+                    if stream.get("codec_name") != CODEC_NAMES.get(declared, declared):
+                        raise ContractViolation("Rendered video codec differs from the canonical report", "invalid_artifact")
+                if "audio_codec" in output:
+                    declared = output["audio_codec"].strip().lower()
+                    audio = [item for item in data["streams"] if item["codec_type"] == "audio"]
+                    if not audio or any(item.get("codec_name") != CODEC_NAMES.get(declared, declared) for item in audio):
+                        raise ContractViolation("Rendered audio codec differs from the canonical report", "invalid_artifact")
                 duration = float(data["format"]["duration"])
                 width, height = int(stream["width"]), int(stream["height"])
                 if duration <= 0 or width <= 0 or height <= 0 or abs(duration - output["duration_seconds"]) > 0.5 or output["resolution"] != f"{width}x{height}":

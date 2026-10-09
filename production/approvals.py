@@ -6,7 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from lib.checkpoint import validate_checkpoint
-from production.contracts import CallIntent, ContractViolation, FileWriteIntent, TaskCommand
+from production.contracts import ContractViolation, TaskCommand
 from production.pi_config import profile_for_snapshot
 
 
@@ -53,12 +53,8 @@ class ApprovalService:
 
     def resume(self, task_id, request, key):
         task = self.repository.get_task(task_id)
-        profile_for_snapshot(self.config, task.config_snapshot)
-        for intent in self.repository.unresolved_intents(task_id):
-            if isinstance(intent, CallIntent) and intent.status in {"submitted", "outcome_unknown"}:
-                raise ContractViolation("An external submission needs trusted reconciliation before resuming", "outcome_unknown")
-            if isinstance(intent, FileWriteIntent):
-                raise ContractViolation("Pending file writes need reconciliation before resuming", "file_conflict")
+        if task.version == request.expected_version:
+            profile_for_snapshot(self.config, task.config_snapshot)
         command = TaskCommand(command_id="cmd-" + uuid4().hex, task_id=task_id, run_id=task.run_id, kind="resume",
                               expected_version=request.expected_version, idempotency_key=key,
                               payload={"comment": request.comment})

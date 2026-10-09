@@ -156,3 +156,15 @@ def test_credential_reference_cannot_replace_isolation_environment_or_enable_unc
                          config_snapshot=snapshot,session=SessionReference(path="task-a/run-a/session.jsonl"))
     with pytest.raises(ContractViolation, match="guarded"):
         prepare_pi(profile,context,tmp_path,environment={"NEW_API_KEY":"private-key"})
+
+
+def test_configured_action_threshold_reaches_the_frozen_browser_run(tmp_path):
+    from production.contracts import TaskCreate
+    from production.pi_config import load_studio_config, snapshot_for
+
+    path = tmp_path / "threshold.yaml"
+    path.write_text("budget:\n  single_action_approval_usd: 0.10\nstudio:\n  enabled: true\n")
+    config = load_studio_config(path, environment={})
+    snapshot = snapshot_for(config.profiles["xvan"], TaskCreate(brief="A lighthouse"),
+                            single_action_approval_usd_micros=config.single_action_approval_usd_micros)
+    assert snapshot.single_action_approval_usd_micros == 100000

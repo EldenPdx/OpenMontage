@@ -230,6 +230,7 @@ class StudioConfig(BaseModel):
     default_profile: str = "xvan"
     profiles: dict[str, PiProfile] = Field(default_factory=lambda: {"xvan": PiProfile()})
     concurrency: Literal[1] = 1
+    single_action_approval_usd_micros: int = Field(default=500_000, strict=True, ge=0)
     media_models: dict[str, str] = Field(default_factory=lambda: {
         "image": "Images2.5-Flare", "video": "dreamina-seedance-2-5-260628",
     })

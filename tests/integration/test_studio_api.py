@@ -117,6 +117,12 @@ def test_sse_replays_persisted_events_after_cursor_and_never_crosses_tasks(api):
     assert second["task_id"] not in response.text
     assert f"id: {initial.event_id}\n" not in response.text
     assert '"state":"cancelled"' in response.text
+    cursor = repo.events(first["task_id"])[1].event_id
+    reconnected = client.get(f"/api/studio/tasks/{first['task_id']}/events?after={initial.event_id}",
+                             headers={"Last-Event-ID": str(cursor)})
+    assert reconnected.status_code == 200
+    assert f"id: {cursor}\n" not in reconnected.text
+    assert '"state":"cancelled"' in reconnected.text
     future = client.get(f"/api/studio/tasks/{first['task_id']}/events", headers={"Last-Event-ID": "99999999"})
     assert future.status_code == 409
     assert future.json()["error"]["code"] == "cursor_expired"

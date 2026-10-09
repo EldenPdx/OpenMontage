@@ -27,8 +27,7 @@ def events_router(backend):
             if not last_event_id.isascii() or not last_event_id.isdigit() or len(last_event_id) > 18:
                 raise ContractViolation("Invalid event cursor")
             last = int(last_event_id)
-            if after not in (0, last):
-                raise ContractViolation("Conflicting event cursors")
+            # Native EventSource reconnects keep the bootstrap query unchanged.
             after = last
         if after < 0 or after > 2**63 - 1:
             raise ContractViolation("Invalid event cursor")

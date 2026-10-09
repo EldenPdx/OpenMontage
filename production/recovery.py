@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -111,18 +112,23 @@ class RecoveryService:
         self.runtime_root, self.projects_dir = Path(runtime_root).resolve(), Path(projects_dir).resolve()
         self.held_leases = held_leases if held_leases is not None else {}
 
+    async def _db(self, method, *args, **kwargs):
+        return await asyncio.to_thread(method, *args, **kwargs)
+
     async def recover(self):
-        self.repository.recover_expired_leases()
+        await self._db(self.repository.recover_expired_leases)
         recovered, after = 0, None
         while True:
-            tasks = self.repository.list_tasks(limit=200, after=after)
+            tasks = await self._db(self.repository.list_tasks, limit=200, after=after)
             if not tasks:
                 return recovered
             for task in tasks:
                 if task.state != TaskState.RECOVERY_REQUIRED:
                     continue
-                context = self.repository.recovery_context(task.task_id)
-                path = process_path(self.runtime_root, context)
+                context = await self._db(self.repository.recovery_context, task.task_id)
+                active_path = process_path(self.runtime_root, context)
+                archive = active_path.with_name(f"{context.run_id}.recovering-{context.fence}.json")
+                path = active_path if active_path.is_file() else archive
                 if not path.is_file():
                     continue
                 try:
@@ -133,26 +139,32 @@ class RecoveryService:
                     for tool_path, tool_record in records:
                         await asyncio.to_thread(confirm_tool_process_exit, self.repository, tool_record, context)
                         tool_path.unlink(missing_ok=True)
+                    intents = await self._db(self.repository.unresolved_intents, task.task_id)
+                    counter = self.runtime_root / "runs" / context.task_id / context.run_id / "active-time.json"
+                    previous = json.loads(counter.read_text()) if counter.exists() else {}
+                    seconds = previous.get("seconds", 0)
+                    if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not math.isfinite(seconds) or seconds < 0 or (not counter.exists() and record["fence"] > 2):
+                        raise ContractViolation("Active-time evidence requires reconciliation", "file_conflict")
+                    if previous.get("last_fence") != record["fence"]:
+                        await asyncio.to_thread(write_private, counter, {"seconds": seconds + max(0, time.time() - record["started_at"]), "last_fence": record["fence"]})
+                    if path != archive:
+                        path.replace(archive)
                     lease = self.held_leases.pop(context.task_id, None)
                     if lease is not None:
                         lease.close()
                     from lib.checkpoint import StudioProjectLease
                     with StudioProjectLease(self.projects_dir / context.project_id, f"{context.task_id}/{context.run_id}/{context.fence}"):
-                        self.repository.release_recovered_lease(task.task_id, fence=context.fence, terminated=True)
-                    if self.repository.get_task(task.task_id).state != TaskState.CANCELLED:
-                        self._reconcile_files(context)
-                    active_path = self.runtime_root / "runs" / context.task_id / context.run_id / "active-time.json"
-                    previous = json.loads(active_path.read_text()) if active_path.exists() else {}
-                    if previous.get("last_fence") != record["fence"]:
-                        write_private(active_path, {"seconds": previous.get("seconds", 0) + max(0, time.time() - record["started_at"]), "last_fence": record["fence"]})
-                    path.unlink()
+                        await self._db(self.repository.release_recovered_lease, task.task_id, fence=context.fence, terminated=True)
+                    if (await self._db(self.repository.get_task, task.task_id)).state != TaskState.CANCELLED:
+                        await asyncio.to_thread(self._reconcile_files, context, intents)
+                    archive.unlink()
                     recovered += 1
-                except (ContractViolation, OSError, ValueError, KeyError):
+                except (ContractViolation, OSError, ValueError, KeyError, TypeError, IndexError):
                     # Retain ownership and journals when identity/evidence is ambiguous.
                     continue
             after = tasks[-1].task_id
 
-    def _reconcile_files(self, context):
+    def _reconcile_files(self, context, intents):
         from production.task_service import file_sha256
 
         project = (self.projects_dir / context.project_id).resolve()
@@ -160,7 +172,7 @@ class RecoveryService:
             raise ContractViolation("Recovered project escaped its root", "file_conflict")
         revisions_path = project / ".studio-revisions.json"
         revisions = json.loads(revisions_path.read_text()) if revisions_path.exists() else {}
-        for intent in self.repository.unresolved_intents(context.task_id):
+        for intent in intents:
             if not isinstance(intent, FileWriteIntent):
                 continue
             target = (project / intent.target.path).resolve()

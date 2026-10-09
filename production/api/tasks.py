@@ -129,7 +129,8 @@ def mount_studio(app, *, repository=None, config=None, environment=None, project
         from production.policy import media_configuration_sha256
         media_hash = media_configuration_sha256()
         snapshot = snapshot_for(profile, body, media_models=config.media_models,
-                                media_configuration_sha256=media_hash)
+                                media_configuration_sha256=media_hash,
+                                single_action_approval_usd_micros=config.single_action_approval_usd_micros)
         task = await asyncio.to_thread(repo.create_task, body, snapshot, key)
         return task_view(task)
 
