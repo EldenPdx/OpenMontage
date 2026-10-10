@@ -1,5 +1,6 @@
 /** Trusted run-bound bridge. Provider interception happens inside streamSimple, not advisory hooks. */
 import { createHash, randomUUID } from "node:crypto";
+import { getCurrentTools } from "@earendil-works/pi-ai";
 import {
   anthropicMessagesApi, createAssistantMessageEventStream, openAICompletionsApi, openAIResponsesApi,
 } from "@earendil-works/pi-ai/compat";
@@ -66,7 +67,7 @@ export default async function (pi: ExtensionAPI) {
           const underlying = delegate.streamSimple({ ...model, api: profile.api, baseUrl: profile.base_url }, context, {
             ...options, apiKey: process.env[profile.credential_env], headers,
             maxTokens: profile.max_output_tokens, reasoning: profile.thinking_level, samplingParams: profile.sampling_params,
-            maxRetries: 0, timeoutMs: profile.request_timeout_seconds * 1000, transport: "sse", cacheRetention: "none",
+            maxRetries: 0, timeoutMs: profile.request_timeout_seconds * 1000, transport: "sse",
             onPayload: undefined, onResponse: undefined,
             fetch: async (request: any, init: any) => {
               const response = await globalThis.fetch(request, init);
@@ -96,7 +97,7 @@ export default async function (pi: ExtensionAPI) {
           }
           const code = error instanceof BridgeError ? error.code : "bridge_unavailable";
           const message = emptyMessage(model);
-          if (code === "approval_conflict") {
+          if (code === "approval_conflict" && getCurrentTools(context.messages).length > 0) {
             message.content = [{ type: "text", text: "[studio-paused] Awaiting the browser's current approval." }];
             output.push({ type: "done", reason: "stop", message });
           } else {

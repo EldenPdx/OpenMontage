@@ -568,7 +568,7 @@ class ProductionToolBridge:
         with self.store.checkpoint_writer(context) as writer:
             write_checkpoint(self.store.projects_dir, context.project_id, gate.stage, "completed", checkpoint["artifacts"],
                              pipeline_type=checkpoint["pipeline_type"], human_approved=True,
-                             metadata=checkpoint.get("metadata"), _writer=writer)
+                             metadata=checkpoint.get("metadata"), cost_snapshot=checkpoint.get("cost_snapshot"), _writer=writer)
         approvals = self.store.project(context) / ".studio-approved-files.json"
         protected = json.loads(approvals.read_text()) if approvals.exists() else {}
         protected[gate.artifact.path] = gate.artifact.sha256

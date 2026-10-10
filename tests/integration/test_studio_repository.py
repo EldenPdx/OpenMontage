@@ -230,6 +230,7 @@ def test_budget_reservations_are_atomic_and_unknown_outcomes_keep_the_hold(repos
     assert (cost.spent_usd_micros, cost.reserved_usd_micros, cost.unknown_call_count) == (400_000, 500_000, 1)
     with pytest.raises(ContractViolation, match="submit"):
         restarted.update_call(unknown.model_copy(update={"status": "submitted"}))
+    restarted.update_call(unknown.model_copy(update={"status": "receipted", "usage": {"input": 10, "output": 2}}))
     received = restarted.reserve_call(intent_for(task, claim, "call-unpriced-received", 50_000).model_copy(update={"price_status": "unquoted"}))
     restarted.update_call(received.model_copy(update={"status": "receipted", "usage": {"total": 15}}))
     cost = restarted.get_task(task.task_id).cost

@@ -56,10 +56,23 @@ class Worker:
         error = None
         async for event in runner.events():
             message = event.get("message") or {}
+            budget_rejected = False
             if message.get("stopReason") in {"error", "aborted"}:
                 error = ContractViolation("Pi model request failed", "rpc_error")
-                if message.get("api") == "studio-guarded" and message.get("errorMessage") == "studio-policy:budget_exceeded":
-                    error = ContractViolation("Recorded costs and unreconciled fee holds exhaust the approved budget; reconcile gateway billing before resuming", "budget_exceeded")
+                budget_rejected = message.get("api") == "studio-guarded" and message.get("errorMessage") == "studio-policy:budget_exceeded"
+            if event["type"] == "compaction_end":
+                if event.get("errorMessage"):
+                    error = ContractViolation("Pi context compaction failed", "rpc_error")
+                    budget_rejected = event["errorMessage"] in {
+                        "Context overflow recovery failed: Summarization failed: studio-policy:budget_exceeded",
+                        "Context overflow recovery failed: Turn prefix summarization failed: studio-policy:budget_exceeded",
+                        "Auto-compaction failed: Summarization failed: studio-policy:budget_exceeded",
+                        "Auto-compaction failed: Turn prefix summarization failed: studio-policy:budget_exceeded",
+                    }
+                elif event.get("result") and event.get("willRetry"):
+                    error = None
+            if budget_rejected:
+                error = ContractViolation("Recorded costs and unreconciled fee holds exhaust the approved budget; reconcile gateway billing before resuming", "budget_exceeded")
             if event["type"] == "agent_settled":
                 return error
         raise ContractViolation("Pi exited before settling", "rpc_error")

@@ -22,7 +22,7 @@ from tests.integration.test_studio_repository import repository, repository_fact
 @pytest.mark.asyncio
 async def test_default_xvan_alias_native_two_turn_tools_and_usage_match_production_contract(repository, tmp_path):
     require_pi()
-    requests = []
+    requests, affinity = [], []
     app = FastAPI()
     task_id = None
     usage = {"input_tokens": 100, "output_tokens": 7, "total_tokens": 107,
@@ -34,6 +34,7 @@ async def test_default_xvan_alias_native_two_turn_tools_and_usage_match_producti
         assert request.headers["authorization"] == "Bearer wire-test-key"
         body = await request.json()
         requests.append(body)
+        affinity.append({name: request.headers.get(name) for name in ("session_id", "x-client-request-id")})
         submitted = repository.unresolved_intents(task_id)
         assert any(intent.kind == "model" and intent.status == "submitted" for intent in submitted)
         items = [tool_item("openmontage", {"action": "read", "input": {"path": "AGENT_GUIDE.md"}}, "wire_read")] if len(requests) == 1 else [text_item("The exact tool result has been read.")]
@@ -59,7 +60,7 @@ async def test_default_xvan_alias_native_two_turn_tools_and_usage_match_producti
                                  trusted_extension=Path(__file__).resolve().parents[2] / "pi-runtime/extensions/openmontage.ts")
             client = PiRPC(managed.argv, cwd=managed.work_dir, env={**managed.env, **server.environment},
                            session_root=managed.session_root, redact_values=(*managed.redact_values, server.token))
-            await client.start(context)
+            session = await client.start(context)
             try:
                 await client.prompt("Use openmontage to read AGENT_GUIDE.md, then reply with one short sentence.", command_id="wire-prompt")
                 async def settled():
@@ -78,6 +79,9 @@ async def test_default_xvan_alias_native_two_turn_tools_and_usage_match_producti
             finally:
                 await client.close()
         assert len(requests) == 2
+        assert [body.get("prompt_cache_key") for body in requests] == [session.session_id] * 2
+        assert affinity == [{"session_id": session.session_id, "x-client-request-id": session.session_id}] * 2
+        assert json.loads((managed.agent_dir / "settings.json").read_text())["cacheWarming"] == "off"
         for body in requests:
             assert body["model"] == "gpt-5.6-sol"
             assert body["max_output_tokens"] == 512

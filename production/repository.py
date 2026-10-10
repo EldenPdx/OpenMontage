@@ -372,6 +372,8 @@ class PostgresRepository:
                 previous = CallIntent.model_validate(row["record"])
                 self._same_call(previous, intent)
                 return previous
+            if connection.execute("SELECT 1 FROM calls WHERE task_id=%s AND status='outcome_unknown' AND record->>'external_job_id' IS NULL LIMIT 1", (task.task_id,)).fetchone():
+                raise ContractViolation("A previous submission has an unknown result; reconcile before authorizing another call", "outcome_unknown")
             if intent.reserved_usd_micros is None:
                 raise ContractViolation("Unknown price requires an authorized reservation", "quote_required")
             if intent.status not in {"prepared", "reserved"} or intent.actual_usd_micros is not None or intent.external_job_id is not None:

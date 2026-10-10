@@ -171,7 +171,7 @@ def prepare_pi(profile: PiProfile, context: RunContext, runtime_root: Path,
         "defaultThinkingLevel": profile.thinking_level, "enabledModels": [f"{profile.provider}/{profile.model}"],
         "defaultTools": ["openmontage"] if trusted_extension is not None else [],
         "defaultProjectTrust": "never", "cacheWarming": "off", "transport": "sse",
-        "compaction": {"enabled": False}, "branchSummary": {"skipPrompt": True},
+        "compaction": {"enabled": trusted_extension is not None}, "branchSummary": {"skipPrompt": True},
         "retry": {"enabled": bool(profile.max_retries), "maxRetries": profile.max_retries,
                   "provider": {"maxRetries": 0, "timeoutMs": int(profile.request_timeout_seconds * 1000)}},
         "httpIdleTimeoutMs": int(profile.idle_timeout_seconds * 1000),
@@ -186,7 +186,7 @@ def prepare_pi(profile: PiProfile, context: RunContext, runtime_root: Path,
     if node is None or not cli.is_file():
         raise ContractViolation("Real pinned Pi/Node runtime is not installed; run make studio-pi", "dependency_unavailable")
     env = {"PATH": str(Path(node).parent) + os.pathsep + os.defpath, "HOME": str(home),
-           "PI_CODING_AGENT_DIR": str(agent_dir), "PI_OFFLINE": "1", "PI_CACHE_RETENTION": "none",
+           "PI_CODING_AGENT_DIR": str(agent_dir), "PI_OFFLINE": "1",
            "LANG": "en_US.UTF-8", **credentials}
     argv = [node, str(cli), "--mode", "rpc", "--offline", "--no-builtin-tools", "--no-extensions",
             "--no-mcp", "--no-skills", "--no-themes", "--no-context-files", "--no-prompt-templates",

@@ -98,7 +98,7 @@ class PiRPC:
             if model.get("provider") != context.config_snapshot.provider or model.get("id") != context.config_snapshot.model:
                 raise ContractViolation("Pi model differs from immutable run configuration", "rpc_error")
             await self.request("set_auto_retry", enabled=False)
-            await self.request("set_auto_compaction", enabled=False)
+            await self.request("set_auto_compaction", enabled=model.get("api") == "studio-guarded")
             return SessionReference(path=context.session.path, session_id=state["sessionId"])
         except BaseException:
             await self.close()

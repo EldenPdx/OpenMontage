@@ -100,9 +100,12 @@ It never starts `--continue`, `--no-session` or a shell command.
 The process drops host auth/models/settings, unrelated credentials, NODE_OPTIONS,
 ambient extensions/MCP and inherited project context. It uses offline model catalog,
 no built-in tools, no extensions/MCP/skills/context files and no project approval;
-the worker explicitly loads only the trusted OpenMontage extension. Compaction,
-cache warming and automatic retries stay disabled until the guarded transport can
-intercept every request. Positive retry configuration requires that extension and
+the worker explicitly loads only the trusted OpenMontage extension. Native compaction
+is enabled only for `studio-guarded`; its summary requests use the same journal,
+budget and turn limit as ordinary model requests. Cache warming and automatic SDK
+retries stay disabled. Normal requests retain Pi's native session/cache-affinity hints;
+these do not guarantee a gateway cache hit or lower fees. Positive retry configuration
+requires that extension and
 is still bounded by worker safe-retry policy. Unknown billed outcomes cannot be
 repeated regardless of configured retry count.
 
