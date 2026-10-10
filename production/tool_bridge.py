@@ -116,7 +116,9 @@ class ProductionToolBridge:
         if not process.is_alive():
             if expected is None:
                 return
-            from production.recovery import process_identity
+            from production.recovery import _group_exists, process_identity
+            if not _group_exists(process.pid):
+                return
             current = process_identity(process.pid)
             if current is not None and current != expected:
                 return
