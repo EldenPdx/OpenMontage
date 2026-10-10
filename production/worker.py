@@ -41,6 +41,12 @@ class Worker:
             if failure.code != "not_found" or marker.exists() or marker.is_symlink():
                 raise
             bootstrap["project"] = None
+        bootstrap["current_checkpoint"] = None
+        if task.current_stage not in {None, "model_cost", "media_cost"}:
+            path = f"checkpoint_{task.current_stage}.json"
+            checkpoint = bridge.store.project(context) / path
+            if checkpoint.exists() or checkpoint.is_symlink():
+                bootstrap["current_checkpoint"] = bridge.read_project(context, path)
         return (
             "You are the OpenMontage production agent. Your only production tool is openmontage. "
             "First read bootstrap.instructions containing the verbatim AGENT_GUIDE.md and discover real tools from bootstrap.catalog. "
@@ -53,6 +59,7 @@ class Worker:
             "checkpoint.artifacts must contain complete JSON objects keyed by artifact name, never file paths or references. "
             "Stop this turn immediately after a checkpoint returns paused=true; only the browser can approve. "
             "On continue/resume read the supplied bootstrap.project; initialize with only title and pipeline_type if it is null. "
+            "Read bootstrap.current_checkpoint for freshly loaded progress after browser approval. Keep completed checkpoints and continue by the manifest; only the backend completes browser-approved checkpoints, never write a gated completed checkpoint yourself. "
             "Continue the exact session and reuse its already-loaded stage guidance and approved JSON. Read project-relative JSON only when missing or revised; do not repeat unchanged reads on recovery. "
             "Keep completed stages; resume known external jobs with zero new POSTs. "
             "Openmontage calls execute sequentially in their listed order. Batch completed checkpoints with dependent operations after reading their guidance; send approval checkpoints alone and stop. "

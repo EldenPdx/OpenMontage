@@ -122,8 +122,9 @@ Openmontage actions in one tool batch execute in order, so a dependent operation
 sees the previous checkpoint. A pending browser gate still rejects later actions
 and prevents the next model request.
 Before each prompt, the bound backend supplies the current Guide, restricted
-catalog and owned project marker. Native Pi reads stage guidance and decides
-the work; these supplied documents avoid a paid model round trip just to fetch them.
+catalog, owned project marker and current checkpoint when present, including fresh
+browser completion. Native Pi reads stage guidance and decides the work; these
+supplied documents avoid a paid model round trip just to fetch them.
 
 Tests in `tests/contracts/test_studio_pi_config.py` use real pinned Pi with local
 Responses/Completions services. They inspect actual request tokens/sampling/thinking,
