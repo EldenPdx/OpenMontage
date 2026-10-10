@@ -115,6 +115,9 @@ original profile API remains in the frozen snapshot and is delivered through the
 private bridge for delegation. The extension forces request authorization/reservation
 before the native provider network call; a thrown before_provider_request hook alone
 is insufficient because Pi v1.1.0 catches those hook exceptions.
+Long-running tool replies follow the bridge's task timeout rather than the model
+client's HTTP idle deadline. Aborting cancels the local request; recorded remote
+jobs remain available for polling without another paid submission.
 
 Tests in `tests/contracts/test_studio_pi_config.py` use real pinned Pi with local
 Responses/Completions services. They inspect actual request tokens/sampling/thinking,

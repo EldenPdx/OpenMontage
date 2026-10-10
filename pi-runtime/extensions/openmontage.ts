@@ -1,5 +1,6 @@
 /** Trusted run-bound bridge. Provider interception happens inside streamSimple, not advisory hooks. */
 import { createHash, randomUUID } from "node:crypto";
+import { request } from "node:http";
 import { getCurrentTools } from "@earendil-works/pi-ai";
 import {
   anthropicMessagesApi, createAssistantMessageEventStream, openAICompletionsApi, openAIResponsesApi,
@@ -19,13 +20,29 @@ export default async function (pi: ExtensionAPI) {
   }
   async function bridge(action: string, input: Record<string, unknown> = {}, signal?: AbortSignal) {
     const timeout = AbortSignal.timeout(["execute", "resume"].includes(action) ? profile.task_timeout_seconds * 1000 : 30_000);
-    const response = await fetch(endpoint + "/" + action, {
-      method: "POST", headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
-      body: JSON.stringify(input), signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+    const payload = Buffer.from(JSON.stringify(input), "utf8");
+    return await new Promise<any>((resolve, reject) => {
+      const call = request(endpoint + "/" + action, {
+        method: "POST", agent: false,
+        headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json", "Content-Length": payload.length },
+        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+      }, response => {
+        const chunks: Buffer[] = [];
+        response.on("error", reject);
+        response.on("aborted", () => reject(new BridgeError("bridge_unavailable")));
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.on("end", () => {
+          try {
+            const result = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+            const status = response.statusCode || 0;
+            if (status < 200 || status >= 300 || !result.ok) throw new BridgeError(result.error?.code || "bridge_unavailable");
+            resolve(result.data);
+          } catch (error) { reject(error); }
+        });
+      });
+      call.on("error", reject);
+      call.end(payload);
     });
-    const result = await response.json() as any;
-    if (!response.ok || !result.ok) throw new BridgeError(result.error?.code || "bridge_unavailable");
-    return result.data;
   }
   const profile = await bridge("profile");
   const delegates: Record<string, any> = {
