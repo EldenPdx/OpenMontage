@@ -70,21 +70,21 @@ class ToolPolicy:
         assets = {asset["id"]: str(self.project_path(context, asset["path"]))
                   for asset in inputs.get("asset_manifest", {}).get("assets", [])
                   if isinstance(asset, dict) and asset.get("id") and asset.get("path")}
-        def visit(value, key=""):
+        def visit(value, key="", path=()):
             if key in self.FORBIDDEN_KEYS or key.endswith(("_url", "_urls")) or key == "url":
                 raise ContractViolation("This tool parameter is not authorized", "forbidden")
             if key == "font" and (not isinstance(value, str) or not re.fullmatch(r"[\w -]{1,100}", value)):
                 raise ContractViolation("Unsafe subtitle font", "forbidden")
             if key in {"primary_color", "outline_color"} and (not isinstance(value, str) or not re.fullmatch(r"(?:&H|#)[A-Fa-f0-9]{6,8}", value)):
                 raise ContractViolation("Unsafe subtitle color", "forbidden")
-            if key == "codec" and value not in {"libx264", "libx265", "copy"}:
+            if key == "codec" and path[:1] != ("asset_manifest",) and value not in {"libx264", "libx265", "copy"}:
                 raise ContractViolation("Encoder is outside the fixed render policy", "forbidden")
             if key == "preset" and value not in {"ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"}:
                 raise ContractViolation("Encoder preset is outside the fixed render policy", "forbidden")
             if isinstance(value, dict):
-                return {name: visit(item, name) for name, item in value.items()}
+                return {name: visit(item, name, (*path, name)) for name, item in value.items()}
             if isinstance(value, list):
-                return [visit(item, key) for item in value]
+                return [visit(item, key, path) for item in value]
             if key == "source" and isinstance(value, str) and value in assets:
                 return assets[value]
             if key in self.PATH_KEYS and isinstance(value, str):
