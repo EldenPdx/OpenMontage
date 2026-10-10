@@ -52,7 +52,7 @@ class Worker:
             "checkpoint.artifacts must contain complete JSON objects keyed by artifact name, never file paths or references. "
             "Stop this turn immediately after a checkpoint returns paused=true; only the browser can approve. "
             "On continue/resume read the supplied bootstrap.project; initialize with only title and pipeline_type if it is null. "
-            "Read existing checkpoints/artifacts by their project-relative JSON paths and continue the exact session. "
+            "Continue the exact session and reuse its already-loaded stage guidance and approved JSON. Read project-relative JSON only when missing or revised; do not repeat unchanged reads on recovery. "
             "Keep completed stages; resume known external jobs with zero new POSTs. "
             "Openmontage calls execute sequentially in their listed order. Batch completed checkpoints with dependent operations after reading their guidance; send approval checkpoints alone and stop. "
             "Finish local delivery after canonical compose/render_report and final_review pass; do not publish externally. "
