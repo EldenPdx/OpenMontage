@@ -32,17 +32,26 @@ class Worker:
         self.stopping = None
         self.held_leases = {}
 
-    def _prompt(self, task, command):
+    def _prompt(self, task, command, bridge, context):
+        bootstrap = {"instructions": bridge.read(context, "AGENT_GUIDE.md"), "catalog": bridge.catalog(context)}
+        try:
+            bootstrap["project"] = bridge.read_project(context, "project.json")
+        except ContractViolation as failure:
+            marker = bridge.store.project(context) / "project.json"
+            if failure.code != "not_found" or marker.exists() or marker.is_symlink():
+                raise
+            bootstrap["project"] = None
         return (
             "You are the OpenMontage production agent. Your only production tool is openmontage. "
-            "First use read to load AGENT_GUIDE.md and catalog to discover real tools. "
+            "First read bootstrap.instructions containing the verbatim AGENT_GUIDE.md and discover real tools from bootstrap.catalog. "
+            "The backend freshly reads both for each command; use these supplied values without fetching them again. "
             "Batch independent instruction, schema and approved-artifact reads in one tool-call turn, including upcoming compose/review guidance. "
             "Select an existing pipeline from the brief, read its manifest and initialize this task's project. "
             "For every stage read its director skill, and read Layer 3 skills before calling providers. "
             "Write schema-valid canonical artifacts and checkpoints through the bridge. "
             "checkpoint.artifacts must contain complete JSON objects keyed by artifact name, never file paths or references. "
             "Stop this turn immediately after a checkpoint returns paused=true; only the browser can approve. "
-            "On continue/resume use read_project with input {\"path\":\"project.json\"}; if not_found, initialize with only title and pipeline_type. "
+            "On continue/resume read the supplied bootstrap.project; initialize with only title and pipeline_type if it is null. "
             "Read existing checkpoints/artifacts by their project-relative JSON paths and continue the exact session. "
             "Keep completed stages; resume known external jobs with zero new POSTs. "
             "Openmontage calls execute sequentially in their listed order. Batch completed checkpoints with dependent operations after reading their guidance; send approval checkpoints alone and stop. "
@@ -52,6 +61,7 @@ class Worker:
             + json.dumps({"brief": task.request.model_dump(mode="json"), "project_id": task.project_id,
                           "current_stage": task.current_stage,
                           "command": command.kind, "feedback": command.payload,
+                          "bootstrap": bootstrap,
                           "frozen_configuration": task.config_snapshot.model_dump(mode="json")}, ensure_ascii=False)
         )
 
@@ -175,7 +185,10 @@ class Worker:
             observation = asyncio.create_task(self._settled(runner))
             if time.monotonic() - started >= remaining:
                 raise ContractViolation("Task active execution time limit reached", "timeout")
-            await runner.prompt(self._prompt(task, claim.command), command_id=claim.command.command_id)
+            message = await self._db(self._prompt, task, claim.command, bridge, context)
+            if time.monotonic() - started >= remaining:
+                raise ContractViolation("Task active execution time limit reached", "timeout")
+            await runner.prompt(message, command_id=claim.command.command_id)
             while True:
                 if lease_keeper.done():
                     await lease_keeper

@@ -138,7 +138,7 @@ export default async function (pi: ExtensionAPI) {
       'initialize: {"title":"Video title","pipeline_type":"cinematic"}',
       'read_project: {"path":"project.json"}',
       "checkpoint.artifacts maps canonical artifact names to complete JSON objects, not file paths or returned references. Reuse the original artifact value, or read_project its file and use the content object.",
-      "On continue/resume first read project.json; if missing, read the chosen manifest and initialize. Read checkpoints with path checkpoint_<stage>.json and artifacts with path artifacts/<name>.json. Read schemas/artifacts/<name>.schema.json before writing an artifact; fill the complete schema-valid value. execute receives registry inputs and assigns call_id automatically. Stop immediately when checkpoint returns paused=true.",
+      "On continue/resume use backend-supplied bootstrap.project when provided; otherwise read project.json. If the project is missing, read the chosen manifest and initialize. Read checkpoints with path checkpoint_<stage>.json and artifacts with path artifacts/<name>.json. Read schemas/artifacts/<name>.schema.json before writing an artifact; fill the complete schema-valid value. execute receives registry inputs and assigns call_id automatically. Stop immediately when checkpoint returns paused=true.",
     ].join("\n"),
     parameters: Type.Object({
       action: Type.Union(["catalog", "read", "read_project", "initialize", "artifact", "checkpoint", "execute", "resume"].map(value => Type.Literal(value))),
