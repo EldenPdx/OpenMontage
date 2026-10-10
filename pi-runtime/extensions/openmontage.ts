@@ -118,6 +118,7 @@ export default async function (pi: ExtensionAPI) {
       "Input contracts: catalog {}; read {path: repository-relative instruction file}; read_project {path: project-relative canonical JSON file}; initialize {title, pipeline_type: manifest basename without .yaml}; artifact {name, value}; checkpoint {stage, status, artifacts, summary?}; execute {tool_name, inputs}; resume {call_id: known external job's original tool call ID}.",
       'initialize: {"title":"Video title","pipeline_type":"cinematic"}',
       'read_project: {"path":"project.json"}',
+      "checkpoint.artifacts maps canonical artifact names to complete JSON objects, not file paths or returned references. Reuse the original artifact value, or read_project its file and use the content object.",
       "On continue/resume first read project.json; if missing, read the chosen manifest and initialize. Read checkpoints with path checkpoint_<stage>.json and artifacts with path artifacts/<name>.json. Read schemas/artifacts/<name>.schema.json before writing an artifact; fill the complete schema-valid value. execute receives registry inputs and assigns call_id automatically. Stop immediately when checkpoint returns paused=true.",
     ].join("\n"),
     parameters: Type.Object({

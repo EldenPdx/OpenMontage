@@ -39,6 +39,7 @@ class Worker:
             "Select an existing pipeline from the brief, read its manifest and initialize this task's project. "
             "For every stage read its director skill, and read Layer 3 skills before calling providers. "
             "Write schema-valid canonical artifacts and checkpoints through the bridge. "
+            "checkpoint.artifacts must contain complete JSON objects keyed by artifact name, never file paths or references. "
             "Stop this turn immediately after a checkpoint returns paused=true; only the browser can approve. "
             "On continue/resume use read_project with input {\"path\":\"project.json\"}; if not_found, initialize with only title and pipeline_type. "
             "Read existing checkpoints/artifacts by their project-relative JSON paths and continue the exact session. "
