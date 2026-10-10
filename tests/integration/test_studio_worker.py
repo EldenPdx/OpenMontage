@@ -143,19 +143,21 @@ async def test_live_cancel_stops_real_pi_and_never_runs_a_followup(repository, t
                 await asyncio.gather(execution, return_exceptions=True)
 
 
-def completed_project(repository, tmp_path):
+def completed_project(repository, tmp_path, *, context=None):
     from lib.checkpoint import CANONICAL_STAGE_ARTIFACTS, write_checkpoint
     from lib.pipeline_loader import load_pipeline_readonly
     from production.artifact_io import ArtifactStore
     from tests.contracts.test_phase0_contracts import sample_artifact
 
-    request = TaskCreate(brief="A local rendered video", profile_id="local")
-    profile = local_config("http://127.0.0.1:1/v1").profiles["local"]
-    task = repository.create_task(request, snapshot_for(profile, request), "verify-canonical-render")
-    claim = repository.claim_command("verify-worker")
-    repository.transition(task.task_id, TaskState.RUNNING, expected_version=1, fence=claim.context.fence)
+    if context is None:
+        request = TaskCreate(brief="A local rendered video", profile_id="local")
+        profile = local_config("http://127.0.0.1:1/v1").profiles["local"]
+        task = repository.create_task(request, snapshot_for(profile, request), "verify-canonical-render")
+        claim = repository.claim_command("verify-worker")
+        repository.transition(task.task_id, TaskState.RUNNING, expected_version=1, fence=claim.context.fence)
+        context = claim.context
     store = ArtifactStore(repository, tmp_path / "projects")
-    project = store.initialize(claim.context, title="Local render", pipeline_type="animated-explainer")
+    project = store.initialize(context, title="Local render", pipeline_type="animated-explainer")
     video = project / "renders/final.mp4"
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=blue:s=320x180:d=1:r=25", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(video)], check=True, timeout=20)
     report = {"version": "1.0", "outputs": [{"path": "renders/final.mp4", "format": "mp4", "resolution": "320x180", "duration_seconds": 1}]}
@@ -168,12 +170,12 @@ def completed_project(repository, tmp_path):
         if stage["name"] == "compose":
             artifacts["final_review"] = review
         for artifact_name, value in artifacts.items():
-            store.artifact(claim.context, artifact_name, value)
-        with store.checkpoint_writer(claim.context) as writer:
-            write_checkpoint(store.projects_dir, task.project_id, stage["name"], "completed", artifacts, pipeline_type="animated-explainer", human_approved=True, _writer=writer)
+            store.artifact(context, artifact_name, value)
+        with store.checkpoint_writer(context) as writer:
+            write_checkpoint(store.projects_dir, context.project_id, stage["name"], "completed", artifacts, pipeline_type="animated-explainer", human_approved=True, _writer=writer)
         if stage["name"] == "compose":
             break
-    return claim.context, project
+    return context, project
 
 
 @pytest.mark.parametrize("tamper", ["video", "review"])

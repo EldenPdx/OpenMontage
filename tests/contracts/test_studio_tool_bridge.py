@@ -46,6 +46,24 @@ def test_instruction_reads_include_layer_three_but_exclude_credentials(tmp_path)
             policy.instruction_path(name)
 
 
+def test_canonical_artifact_schemas_are_readable_without_exposing_other_json(tmp_path):
+    from production.policy import ToolPolicy
+    policy = ToolPolicy(tmp_path, tmp_path / "projects")
+    directory = tmp_path / "schemas/artifacts"
+    directory.mkdir(parents=True)
+    schema = directory / "brief.schema.json"
+    schema.write_text('{"type":"object"}')
+    assert policy.instruction_path("schemas/artifacts/brief.schema.json").read_text() == '{"type":"object"}'
+    secret = tmp_path / "secret.json"
+    secret.write_text('{"secret":"private"}')
+    (directory / "escape.schema.json").symlink_to(secret)
+    (directory / ".private.schema.json").write_text('{"secret":"private"}')
+    for name in ("secret.json", "schemas/artifacts/secret.json", "schemas/artifacts/escape.schema.json",
+                 "schemas/artifacts/.private.schema.json"):
+        with pytest.raises(ContractViolation):
+            policy.instruction_path(name)
+
+
 def test_existing_cli_cannot_write_an_active_studio_project(tmp_path, monkeypatch):
     from lib.checkpoint import CheckpointValidationError, init_project
     project = tmp_path / "owned"

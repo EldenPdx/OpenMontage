@@ -40,7 +40,8 @@ class Worker:
             "For every stage read its director skill, and read Layer 3 skills before calling providers. "
             "Write schema-valid canonical artifacts and checkpoints through the bridge. "
             "Stop this turn immediately after a checkpoint returns paused=true; only the browser can approve. "
-            "On continue/resume read_project for existing checkpoints and artifacts, and continue the exact session. "
+            "On continue/resume use read_project with input {\"path\":\"project.json\"}; if not_found, initialize with only title and pipeline_type. "
+            "Read existing checkpoints/artifacts by their project-relative JSON paths and continue the exact session. "
             "Keep completed stages; resume known external jobs with zero new POSTs. "
             "Finish local delivery after canonical compose/render_report and final_review pass; do not publish externally. "
             "Do not change providers, models, runtime or budget without a fresh browser approval. "
@@ -51,11 +52,13 @@ class Worker:
         )
 
     async def _settled(self, runner):
-        error = False
+        error = None
         async for event in runner.events():
             message = event.get("message") or {}
             if message.get("stopReason") in {"error", "aborted"}:
-                error = True
+                error = ContractViolation("Pi model request failed", "rpc_error")
+                if message.get("api") == "studio-guarded" and message.get("errorMessage") == "studio-policy:budget_exceeded":
+                    error = ContractViolation("Recorded costs and unreconciled fee holds exhaust the approved budget; reconcile gateway billing before resuming", "budget_exceeded")
             if event["type"] == "agent_settled":
                 return error
         raise ContractViolation("Pi exited before settling", "rpc_error")
@@ -181,6 +184,19 @@ class Worker:
                     result = await asyncio.to_thread(self.service.completion, context, request=task.request)
                     if result is not None:
                         return await self._transition(context, TaskState.SUCCEEDED, updates={"result": result})
+                    if failed and failed.code == "budget_exceeded":
+                        raise failed
+                    if failed:
+                        intents = await self._db(self.repository.unresolved_intents, context.task_id)
+                        rejected = next((intent.usage["http_status"] for intent in intents
+                                         if isinstance(intent, CallIntent) and intent.kind == "model"
+                                         and (intent.run_id, intent.fence) == (context.run_id, context.fence)
+                                         and intent.status == "receipted" and intent.usage.get("http_status") in {401, 403}), None)
+                        if rejected:
+                            return await self._transition(context, TaskState.BLOCKED, updates={"error": ErrorDTO(
+                                code="forbidden" if rejected == 403 else "profile_unavailable",
+                                message=f"Model provider rejected the request (HTTP {rejected}); check administrator credentials and network access before resuming",
+                                recovery_actions=["resume"])})
                     code = "rpc_error" if failed else "invalid_artifact"
                     state = TaskState.FAILED if failed else TaskState.BLOCKED
                     return await self._transition(context, state, updates={"error": ErrorDTO(code=code, message="Pi settled without a verified canonical video or pending browser gate", recovery_actions=["resume"])})

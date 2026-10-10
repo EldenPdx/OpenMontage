@@ -52,6 +52,7 @@ export default async function (pi: ExtensionAPI) {
       void (async () => {
         let intent: any = null;
         let terminal: any = null;
+        let httpStatus: number | undefined;
         try {
           if (model.provider !== profile.provider || model.id !== profile.model || options?.signal?.aborted) {
             throw new BridgeError("forbidden");
@@ -66,7 +67,12 @@ export default async function (pi: ExtensionAPI) {
             ...options, apiKey: process.env[profile.credential_env], headers,
             maxTokens: profile.max_output_tokens, reasoning: profile.thinking_level, samplingParams: profile.sampling_params,
             maxRetries: 0, timeoutMs: profile.request_timeout_seconds * 1000, transport: "sse", cacheRetention: "none",
-            onPayload: undefined, onResponse: undefined, fetch: undefined,
+            onPayload: undefined, onResponse: undefined,
+            fetch: async (request: any, init: any) => {
+              const response = await globalThis.fetch(request, init);
+              httpStatus = response.status;
+              return response;
+            },
           });
           for await (const event of underlying) {
             if (event.type === "done" || event.type === "error") terminal = event;
@@ -75,10 +81,12 @@ export default async function (pi: ExtensionAPI) {
           if (!terminal) throw new BridgeError("outcome_unknown");
           const message = terminal.message || terminal.error;
           const { task_id, run_id, fence, ...record } = intent;
+          const rejected = terminal.type === "error" && (httpStatus === 401 || httpStatus === 403);
           const known = terminal.type === "done" || message.usage.totalTokens > 0;
-          await bridge("settle", { ...record, status: known ? "settled" : "outcome_unknown",
+          await bridge("settle", { ...record, status: rejected ? "receipted" : known ? "settled" : "outcome_unknown",
                                    usage: { input: message.usage.input, output: message.usage.output,
-                                            cacheRead: message.usage.cacheRead, cacheWrite: message.usage.cacheWrite } });
+                                            cacheRead: message.usage.cacheRead, cacheWrite: message.usage.cacheWrite,
+                                            ...(rejected ? { http_status: httpStatus } : {}) } });
           output.push(terminal);
           output.end();
         } catch (error) {
@@ -104,7 +112,14 @@ export default async function (pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: "openmontage", label: "OpenMontage", description: "Run controlled production actions. Read AGENT_GUIDE.md, the selected manifest and director/provider skills. Use schema-valid artifacts and checkpoints; browser approval is supplied by the backend only.",
+    name: "openmontage", label: "OpenMontage", description: [
+      "Run controlled production actions. Read AGENT_GUIDE.md, the selected manifest and director/provider skills. Browser approval is supplied by the backend only.",
+      "The current project/run are bound by the backend; never include project_id, run_id or human_approved in input.",
+      "Input contracts: catalog {}; read {path: repository-relative instruction file}; read_project {path: project-relative canonical JSON file}; initialize {title, pipeline_type: manifest basename without .yaml}; artifact {name, value}; checkpoint {stage, status, artifacts, summary?}; execute {tool_name, inputs}; resume {call_id: known external job's original tool call ID}.",
+      'initialize: {"title":"Video title","pipeline_type":"cinematic"}',
+      'read_project: {"path":"project.json"}',
+      "On continue/resume first read project.json; if missing, read the chosen manifest and initialize. Read checkpoints with path checkpoint_<stage>.json and artifacts with path artifacts/<name>.json. Read schemas/artifacts/<name>.schema.json before writing an artifact; fill the complete schema-valid value. execute receives registry inputs and assigns call_id automatically. Stop immediately when checkpoint returns paused=true.",
+    ].join("\n"),
     parameters: Type.Object({
       action: Type.Union(["catalog", "read", "read_project", "initialize", "artifact", "checkpoint", "execute", "resume"].map(value => Type.Literal(value))),
       input: Type.Record(Type.String(), Type.Unknown()),

@@ -59,7 +59,8 @@ class ToolPolicy:
         path = (self.repo_root / relative).resolve()
         resolved_relative = path.relative_to(self.repo_root).as_posix() if path.is_relative_to(self.repo_root) else ""
         allowed = resolved_relative == "AGENT_GUIDE.md" or resolved_relative.startswith(("pipeline_defs/", "skills/", ".agents/skills/"))
-        if not allowed or not path.is_relative_to(self.repo_root) or path.suffix not in {".md", ".yaml"}:
+        artifact_schema = path.parent == self.repo_root / "schemas/artifacts" and path.name.endswith(".schema.json") and not path.name.startswith(".")
+        if not ((allowed and path.suffix in {".md", ".yaml"}) or artifact_schema):
             raise ContractViolation("Only production instructions may be read", "forbidden")
         if not path.is_file() or path.stat().st_size > 256 * 1024:
             raise ContractViolation("Instruction file is missing or too large", "not_found")

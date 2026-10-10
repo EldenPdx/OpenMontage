@@ -623,6 +623,8 @@ class ProductionToolBridge:
             return existing
         if intent.status == "outcome_unknown":
             return self.repository.update_call(existing.model_copy(update={"status": "outcome_unknown"}))
+        if intent.status == "receipted" and intent.usage.get("http_status") in {401, 403}:
+            return self.repository.update_call(existing.model_copy(update={"usage": intent.usage, "status": "receipted"}))
         amount = estimated_cost_usd_micros(self.model_profile, intent.usage)
         if amount is None:
             return self.repository.update_call(existing.model_copy(update={"usage": intent.usage, "status": "receipted"}))
