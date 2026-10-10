@@ -274,14 +274,23 @@ class ProductionToolBridge:
         return task
 
     def catalog(self, context):
-        self.ready(context)
+        task = self.ready(context)
         tools = []
         for name in sorted(self.allowed_tools):
             tool = self.registry.get(name)
             if tool is not None:
-                tools.append({"name": name, "provider": tool.provider, "capability": tool.capability,
-                              "input_schema": tool.input_schema, "agent_skills": tool.agent_skills,
-                              "status": tool.get_status().value})
+                entry = {"name": name, "provider": tool.provider, "capability": tool.capability,
+                         "input_schema": tool.input_schema, "agent_skills": tool.agent_skills,
+                         "status": tool.get_status().value}
+                if name in {"newapi_image", "newapi_video"}:
+                    frozen = task.config_snapshot.media_configuration_sha256
+                    if frozen is not None and media_configuration_sha256(getattr(tool, "config_path", None)) != frozen:
+                        raise ContractViolation("The trusted media gateway configuration changed", "profile_unavailable")
+                    selected = task.config_snapshot.media_models.get(tool.capability) or task.config_snapshot.media_models.get(
+                        {"newapi_image": "image", "newapi_video": "video"}[name])
+                    profiles = tool.get_info().get("model_catalog", {})
+                    entry["model_catalog"] = {selected: profiles[selected]} if selected in profiles else {}
+                tools.append(entry)
         return {"tools": tools, "instructions": "AGENT_GUIDE.md", "render_runtimes": ["ffmpeg"],
                 "composition_policy": "Fixed FFmpeg media operations; programmable HTML, scripts and custom workflows are disabled",
                 "pipelines": sorted(path.name for path in (self.policy.repo_root / "pipeline_defs").glob("*.yaml"))}
@@ -657,7 +666,9 @@ class ProductionToolBridge:
                 selection = task.config_snapshot.media_models.get(tool.capability) or task.config_snapshot.media_models.get({"image_generation": "image", "video_generation": "video"}.get(tool.capability))
                 if not selection or inputs.get("model") != selection:
                     raise ContractViolation("Media model differs from the approved selection", "approval_conflict")
-                if not task.approval or task.approval.status != "approved" or task.approval.stage == "model_cost":
+                if not task.approval or task.approval.stage == "model_cost" or (
+                        task.approval.status != "approved"
+                        and (task.approval.stage, task.approval.status) != ("media_cost", "revised")):
                     raise ContractViolation("Paid media requires a browser-approved plan", "approval_conflict")
             stage = {"newapi_image": "assets", "newapi_video": "assets", "video_compose": "compose",
                      "video_stitch": "edit", "video_trimmer": "edit"}.get(tool.name)

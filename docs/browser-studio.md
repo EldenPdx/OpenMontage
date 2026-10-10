@@ -174,6 +174,9 @@ select Images2.5-Flare and dreamina-seedance-2-5-260628; narration defaults off.
 Profiles and media gateway settings are frozen for each run. A configuration
 change requires explicit reconciliation or a new task, rather than silently
 changing provider or protocol.
+The agent's catalog includes the selected image/video deployment profiles, with
+their declared parameters, defaults and limits. It does not expose credentials
+or advertise other models as alternatives to the frozen selection.
 
 ## Review, costs, cancellation and recovery
 
@@ -189,6 +192,9 @@ above the configured single-action threshold also need a specific cost approval.
 Reservations are estimates, not a hard limit on gateway charges. Received results
 with unquoted fees retain their holds and display **Unquoted**, rather than zero.
 Only trusted billing reconciliation may settle those holds.
+Requesting revision of a media cost gate lets the agent correct its parameters
+and open a new gate. The corrected request needs its own exact approval; the
+previous decision does not authorize it.
 
 The single-action threshold follows `budget.single_action_approval_usd` by default.
 A trusted `studio.single_action_approval_usd_micros` override takes precedence.
