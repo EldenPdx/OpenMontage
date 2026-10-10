@@ -118,6 +118,9 @@ is insufficient because Pi v1.1.0 catches those hook exceptions.
 Long-running tool replies follow the bridge's task timeout rather than the model
 client's HTTP idle deadline. Aborting cancels the local request; recorded remote
 jobs remain available for polling without another paid submission.
+Openmontage actions in one tool batch execute in order, so a dependent operation
+sees the previous checkpoint. A pending browser gate still rejects later actions
+and prevents the next model request.
 
 Tests in `tests/contracts/test_studio_pi_config.py` use real pinned Pi with local
 Responses/Completions services. They inspect actual request tokens/sampling/thinking,

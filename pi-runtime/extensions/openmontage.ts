@@ -130,6 +130,7 @@ export default async function (pi: ExtensionAPI) {
   });
 
   pi.registerTool({
+    executionMode: "sequential",
     name: "openmontage", label: "OpenMontage", description: [
       "Run controlled production actions. Read AGENT_GUIDE.md, the selected manifest and director/provider skills. Browser approval is supplied by the backend only.",
       "The current project/run are bound by the backend; never include project_id, run_id or human_approved in input.",
