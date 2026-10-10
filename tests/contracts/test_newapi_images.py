@@ -4,6 +4,8 @@ from contextlib import contextmanager
 from email.parser import BytesParser
 from email.policy import default
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import base64
+from io import BytesIO
 import json
 import os
 from pathlib import Path
@@ -192,13 +194,14 @@ def test_partial_multi_image_failure_preserves_successes_and_diagnoses_failed_en
         result = configured_tool(tmp_path, address).execute({"prompt": "Rain", "output_path": str(output)})
     assert not result.success
     assert result.data["error"]["code"] == "partial_media_failure"
-    assert result.data["outputs"] == [str(output), str(tmp_path / "partial_3.png")]
+    assert result.data["outputs"] == [str(output), str(tmp_path / "partial_2.png")]
     assert result.artifacts == result.data["outputs"]
     assert result.data["images_generated"] == 2
     assert result.data["failed_outputs"][0]["index"] == 1
     assert result.data["usage"] == {"output_tokens": 24}
     assert output.read_bytes() == PNG
-    assert not (tmp_path / "partial_2.png").exists()
+    assert (tmp_path / "partial_2.png").read_bytes() == PNG
+    assert not (tmp_path / "partial_3.png").exists()
     assert len(records) == 1
 
 
@@ -336,10 +339,89 @@ def test_object_and_payloadless_data_preserve_actual_image_count_and_redact_echo
         mixed = tool.execute({"prompt": "Rain", "n": 4, "output_path": str(tmp_path / "mixed.png")})
     assert single.success and mixed.success
     assert single.data["images_generated"] == mixed.data["images_generated"] == 1
-    assert mixed.data["outputs"] == [str(tmp_path / "mixed_2.png")]
+    assert mixed.data["outputs"] == [str(tmp_path / "mixed.png")]
+    assert (tmp_path / "mixed.png").read_bytes() == PNG
     assert mixed.data["skipped_entries"] == 1
     assert "image-test-secret" not in repr(single)
     assert len(records) == 2
+
+
+@pytest.mark.parametrize("reverse, broken", [(False, None), (True, None), (False, "url"), (False, "b64_json")])
+def test_split_url_and_base64_entries_are_one_image_with_alternative_sources(tmp_path, reverse, broken):
+    encoded = IMAGE_RESULT["data"][0]["b64_json"]
+    entries = [{"url": "data:image/png;base64," + encoded}, {"b64_json": encoded, "revised_prompt": "Refined rain"}]
+    if broken:
+        entries[0 if broken == "url" else 1][broken] = "data:image/png;base64,broken" if broken == "url" else "broken"
+    response = {"data": list(reversed(entries)) if reverse else entries}
+    output = tmp_path / "split.png"
+    with gateway([(200, response)]) as (address, records):
+        result = configured_tool(tmp_path, address).execute({"prompt": "Rain", "output_path": str(output)})
+    assert result.success, result.error
+    assert result.data["images_generated"] == 1
+    assert result.artifacts == result.data["outputs"] == [str(output)]
+    assert result.data["revised_prompts"] == ["Refined rain"]
+    assert output.read_bytes() == PNG
+    assert not output.with_name("split_2.png").exists()
+    assert result.cost_usd is None
+    assert len(records) == 1
+
+
+def test_combined_image_entry_keeps_its_own_representations_and_image_order(tmp_path):
+    second = BytesIO()
+    Image.new("RGB", (2, 2), "blue").save(second, format="PNG")
+    encoded = base64.b64encode(second.getvalue()).decode()
+    response = {"data": [{"url": "data:image/png;base64," + IMAGE_RESULT["data"][0]["b64_json"]}, {"url": "data:image/png;base64," + encoded, "b64_json": encoded}]}
+    output = tmp_path / "mixed.png"
+    with gateway([(200, response)]) as (address, records):
+        result = configured_tool(tmp_path, address).execute({"prompt": "Rain", "output_path": str(output)})
+    assert result.success, result.error
+    assert result.data["images_generated"] == 2
+    assert result.artifacts == [str(output), str(output.with_name("mixed_2.png"))]
+    assert output.read_bytes() == PNG
+    assert output.with_name("mixed_2.png").read_bytes() == second.getvalue()
+    assert len(records) == 1
+
+
+def test_leading_metadata_and_split_media_create_the_requested_primary_output(tmp_path):
+    encoded = IMAGE_RESULT["data"][0]["b64_json"]
+    response = {"data": [{"revised_prompt": "Metadata only"}, {"url": "data:image/png;base64," + encoded}, {"b64_json": encoded}]}
+    output = tmp_path / "canonical.png"
+    with gateway([(200, response)]) as (address, records):
+        result = configured_tool(tmp_path, address).execute({"prompt": "Rain", "output_path": str(output)})
+    assert result.success, result.error
+    assert result.data["output"] == str(output)
+    assert result.artifacts == result.data["outputs"] == [str(output)]
+    assert output.read_bytes() == PNG
+    assert not output.with_name("canonical_2.png").exists()
+    assert result.data["skipped_entries"] == 1
+    assert len(records) == 1
+
+
+def test_first_saved_image_uses_primary_path_after_an_earlier_media_failure(tmp_path):
+    response = {"data": [{"revised_prompt": "Metadata only"}, {"b64_json": "%%broken%%"}, IMAGE_RESULT["data"][0]]}
+    output = tmp_path / "partial-primary.png"
+    with gateway([(200, response)]) as (address, records):
+        result = configured_tool(tmp_path, address).execute({"prompt": "Rain", "output_path": str(output)})
+    assert not result.success
+    assert result.data["error"]["code"] == "partial_media_failure"
+    assert result.data["output"] == str(output)
+    assert result.artifacts == result.data["outputs"] == [str(output)]
+    assert output.read_bytes() == PNG
+    assert result.data["failed_outputs"][0]["index"] == 1
+    assert not list(tmp_path.glob("partial-primary_*.png"))
+    assert not list(tmp_path.glob("*.part"))
+    assert len(records) == 1
+
+
+@pytest.mark.parametrize("source", ["input", "provider", "default"])
+def test_image_size_uses_the_gateway_ascii_separator_before_submission(tmp_path, source):
+    inputs = {"size": "1024×1024"} if source == "input" else {"provider_params": {"size": "1024×1024"}} if source == "provider" else {}
+    profile = {"defaults": {"n": 1, "size": "1024×1024"}} if source == "default" else {}
+    with gateway([(200, IMAGE_RESULT)]) as (address, records):
+        result = configured_tool(tmp_path, address, profile).execute({"prompt": "Rain", "output_path": str(tmp_path / "invalid-size.png"), **inputs})
+    assert not result.success
+    assert result.data["error"]["code"] == "invalid_request"
+    assert records == []
 
 
 @pytest.mark.parametrize("reply", [None, (504, {"error": {"code": "task_timeout", "message": "Still running"}}), (200, b"not-json")])
@@ -461,14 +543,14 @@ def test_authenticated_task_download_failure_resumes_without_post_and_cdn_has_no
     assert url not in json.dumps(failed.data["resume_job"])
 
 
-def test_one_valid_representation_per_entry_does_not_duplicate_split_entries(tmp_path):
+def test_valid_alternatives_preserve_the_gateway_split_image_count(tmp_path):
     valid_uri = "data:image/png;base64," + IMAGE_RESULT["data"][0]["b64_json"]
     response = {"data": [{"b64_json": "%%bad%%", "url": valid_uri}, {"url": valid_uri}, {"b64_json": IMAGE_RESULT["data"][0]["b64_json"]}]}
     with gateway([(200, response)]) as (address, records):
         result = configured_tool(tmp_path, address).execute({"prompt": "Rain", "output_path": str(tmp_path / "representations.png")})
     assert result.success, result.error
-    assert result.data["images_generated"] == 3
-    assert len(result.artifacts) == 3
+    assert result.data["images_generated"] == 2
+    assert len(result.artifacts) == 2
     assert len(records) == 1
 
 

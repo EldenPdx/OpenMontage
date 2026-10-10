@@ -27,8 +27,22 @@ failed or recovery states, rather than converting them into success.
 
 ## Independent xvan smoke
 
-**Status for this implementation: not run.** No paid inference, image or video
-request is part of default validation, and no production deployment was performed.
+**Status: passed against the configured xvan gateway on 2026-10-10.** Verification
+used production source commit `00e4e91602df6b3c3c1f39d05e2ae704ad3f6d6a` as the
+request-contract reference, without changing that repository or deploying services.
+
+The separately authorized samples verified real Pi Responses streaming and a
+two-turn read-tool exchange with `gpt-5.6-sol`, the standalone `newapi_llm` request,
+one `Images2.5-Flare` PNG (1024×1024), and one
+`dreamina-seedance-2-5-260628` video (H.264 MP4, 1280×720, 4.042 seconds, no audio).
+Resuming that actual saved video job made two GET requests, zero paid POSTs,
+and retained the output SHA-256.
+These are interface samples, not a paid creative production acceptance test.
+Raw fees remain unquoted; the Pi sample's two reservations remain in
+`studio_live_smoke` for trusted reconciliation. Narration was not configured or tested.
+
+Default validation still makes no paid requests. The flags below require a new
+operator authorization; earlier successful samples do not authorize repeats.
 
 Supply credentials only through the backend environment. Start with the read-only
 catalog check:

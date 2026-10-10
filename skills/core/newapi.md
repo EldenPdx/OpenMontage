@@ -59,6 +59,8 @@ The base URL accepts a service root or a single `/v1` suffix. Remote gateways us
 
 Profiles, not model-name prefixes, determine protocols and operations. `/v1/models` metadata cannot infer TTS, edits or asynchronous image support. The gateway owns channel selection, vendor model mapping and pricing. The user token must permit the chosen model; the deployed gateway must have the required channels and plugins.
 
+The generic `openai` catalog marker describes a preferred surface, not an exhaustive list of relay protocols. It does not erase an explicitly configured Responses profile or prove Responses compatibility; verify that exact model/protocol with a separately authorized sample. Concrete protocol conflicts still fail rather than silently selecting another protocol.
+
 ## Approved Tool Calls
 
 These are calls within an already approved pipeline stage, after initialization and budget approval. They use administrator defaults; an explicit `model` can select another declared alias.
@@ -84,6 +86,8 @@ speech = registry.get("tts_selector").execute({
 ```
 
 Image edits use `generation_mode="edit"` plus `image_path` / `image_paths` or `image_url` / `image_urls`, and an optional `mask_path` / `mask_url`. Source-image inputs with no explicit operation select edit mode. The image selector's `operation="generate"` execution control allows an explicit `generation_mode="edit"`; direct image-tool operation/mode conflicts still fail. `request_mode="async"` requires a profile declaring `async` / `async_edit`; synchronous mode is the default. Multipart field names follow `parameter_map`. An explicit image `n=0` is normalized to the upstream paid default of one image, not zero generated images or zero cost. Native local video references go directly to the gateway and do not require a fal key/upload.
+
+Video durations are bounded whole seconds. The OpenAI-compatible JSON wire uses string `seconds`, integer `duration`, and canonical `ratio`; declared plugin extensions use `provider_options`. A plugin-specific `metadata` contract must be configured explicitly: the type-61 Doubao/Seedance plugin reads its rendering options and structured remote references there. JSON reference support does not imply multipart upload support. Conflicting duration or rendering aliases fail before submission. Image sizes use ASCII `x`, and split URL/Base64 representations are saved as one image, with the first successful image written to the requested output path.
 
 `provider_params` may override declared wire defaults and standard values; it cannot replace routing, authentication, endpoints, stream/async controls or output paths. Unsupported semantics fail before submission. TTS accepts `voice` / `voice_id`, `format` / `response_format` / `output_format`, and `speed` / `speaking_rate`, with conflict checks. TTS SSE is unsupported. Raw PCM requires verified `limits.response_format.x-pcm` facts (`sample_rate`, `channels`, `sample_width`); normal audio/video validation requires ffprobe.
 

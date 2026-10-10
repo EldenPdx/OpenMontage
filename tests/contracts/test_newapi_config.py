@@ -70,6 +70,19 @@ class ConfigContract(unittest.TestCase):
         with self.assertRaises(ValueError):
             resolve_model(a, 'text_generation', 'other')
 
+    def test_generic_openai_catalog_retains_explicit_responses_protocol(self):
+        from unittest.mock import Mock
+        from lib.config_model import NewAPIConfig
+        from tools._newapi.config import NewAPISettings
+        from tools._newapi.models import refresh_models, resolve_model
+        config = NewAPIConfig.model_validate({'base_url': 'https://generic-openai.example', 'default_llm_protocol': 'responses', 'default_models': {'text_generation': 'gateway-text'}, 'models': {'gateway-text': {'capabilities': ['text_generation'], 'protocols': ['responses'], 'operations': ['responses']}}})
+        settings = NewAPISettings(config, 'catalog-test-key')
+        client = Mock()
+        client.request_json.return_value = {'data': [{'id': 'gateway-text', 'supported_endpoint_types': ['openai']}]}
+        refresh_models(settings, client)
+        resolved = resolve_model(settings, 'text_generation')
+        self.assertEqual((resolved.id, resolved.protocol), ('gateway-text', 'responses'))
+
     def test_async_operation_limits_and_resume_validation(self):
         from lib.config_model import NewAPIConfig
         from tools._newapi.config import NewAPISettings

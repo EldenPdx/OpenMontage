@@ -68,7 +68,8 @@ def resolve_model(settings, capability, model=None, protocol=None, operation=Non
         if visible is not None:
             metadata = set(visible[selected].get('supported_endpoint_types') or [])
             known = {_ENDPOINT_PROTOCOLS[name] for name in metadata if name in _ENDPOINT_PROTOCOLS}
-            if metadata:
+            # The generic OpenAI marker describes a preferred surface, not every supported protocol.
+            if metadata - {'openai'}:
                 supported &= known
         desired = protocol or settings.config.default_llm_protocol
         desired = 'anthropic' if desired == 'messages' else desired

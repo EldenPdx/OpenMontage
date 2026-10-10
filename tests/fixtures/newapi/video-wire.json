@@ -4,6 +4,11 @@
     "commit": "00e4e91602df6b3c3c1f39d05e2ae704ad3f6d6a",
     "sources": [
       "relaykit/dto/openai_video.go:28-71",
+      "relay/common/relay_info.go:1075-1350",
+      "relay/common/relay_utils.go:268-295",
+      "relay/channel/task/jsplugin/adaptor.go:215-231",
+      "plugins/tasks/doubao/plugin.js:798-904",
+      "plugins/tasks/doubao/plugin.js:1265-1316",
       "plugins/tasks/sora/plugin.js:316-369",
       "pkg/jsplugin/routing.go:97",
       "controller/relay.go:758-815",

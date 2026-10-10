@@ -18,7 +18,9 @@ from tools.video._shared import probe_output
 
 
 _CONTROLS = {"model", "operation", "request_mode", "output_path", "resume_job", "job_path", "poll_timeout", "poll_interval", "provider_params", "preferred_tool", "hosting_provider", "preferred_provider", "preferred_provider_gap", "allowed_providers", "target_operation", "scene_id", "project_dir", "task_context", "sample_mode"}
-_STANDARD = {"prompt", "duration", "duration_seconds", "seconds", "size", "aspect_ratio", "resolution", "seed", "generate_audio", "negative_prompt"}
+_STANDARD = {"prompt", "duration", "duration_seconds", "seconds", "size", "ratio", "aspect_ratio", "resolution", "seed", "generate_audio", "negative_prompt", "metadata", "provider_options"}
+# VideoRequest accepts these fields; native plugin extensions must survive its typed parser.
+_CANONICAL = {"model", "prompt", "mode", "image", "images", "content", "size", "resolution", "duration", "seconds", "ratio", "generate_audio", "moderation", "input_reference", "seed", "n", "response_format", "user", "metadata", "provider_options"}
 _REFERENCES = {"reference_image_path", "image_path", "reference_image_url", "image_url"}
 
 
@@ -107,7 +109,7 @@ def execute_video(inputs, config_path=None):
             for name in wire_inputs:
                 if name in inputs:
                     semantic = "duration" if name == "duration_seconds" else name
-                    target = resolved.profile.parameter_map.get(semantic, semantic)
+                    target = resolved.profile.parameter_map.get(semantic, "ratio" if semantic == "aspect_ratio" else semantic)
                     if target in standard:
                         raise ValueError(f"Conflicting aliases for {target}")
                     standard[target] = inputs[name]
@@ -120,17 +122,80 @@ def execute_video(inputs, config_path=None):
             ) for name in names if inputs.get(name) is not None]
             if len(references) > 1:
                 raise ValueError("Conflicting reference image aliases")
+            structured_images = []
+            for container in (payload, payload.get("metadata", {}), payload.get("provider_options", {})):
+                if not isinstance(container, dict):
+                    raise ValueError("Video metadata and provider_options must be objects")
+                if container.get("image") is not None:
+                    structured_images.append(container["image"])
+                if "images" in container:
+                    if not isinstance(container["images"], list):
+                        raise ValueError("Video images must be an array")
+                    structured_images.extend(container["images"])
+                if "content" in container:
+                    if not isinstance(container["content"], list):
+                        raise ValueError("Video content must be an array")
+                    for item in container["content"]:
+                        if isinstance(item, dict) and item.get("type") == "image_url":
+                            image = item.get("image_url")
+                            structured_images.append(image.get("url") if isinstance(image, dict) else image)
+            for image in structured_images:
+                validate_reference(image)
             reference_field = resolved.profile.parameter_map.get("reference_image", "input_reference")
             if references and (operation != "image_to_video" or reference_field not in resolved.profile.supported_parameters or reference_field in payload):
                 raise ValueError("Reference image is unsupported or conflicts with native parameters")
-            if operation == "image_to_video" and not references and not payload.get(reference_field):
+            if operation == "image_to_video" and not references and not payload.get(reference_field) and not structured_images:
                 raise ValueError("image_to_video requires a reference image")
-            if operation == "text_to_video" and payload.get(reference_field) is not None:
+            if operation == "text_to_video" and (payload.get(reference_field) is not None or structured_images):
                 raise ValueError("text_to_video does not accept a reference image")
             if references and references[0][0] == "url":
                 validate_reference(references[0][1])
             elif payload.get(reference_field) is not None:
                 validate_reference(payload[reference_field])
+            if references and references[0][0] == "url":
+                payload = {"model": resolved.id, **merge_params(resolved, {**standard, reference_field: references[0][1]}, inputs.get("provider_params"))}
+            options = payload.get("provider_options", {})
+            metadata = payload.get("metadata", {})
+            if not isinstance(options, dict) or not isinstance(metadata, dict):
+                raise ValueError("Video metadata and provider_options must be objects")
+            options = dict(options)
+            for name in set(payload) - _CANONICAL:
+                if name in options:
+                    raise ValueError("Conflicting video provider option: " + name)
+                options[name] = payload.pop(name)
+            if options or "provider_options" in payload:
+                payload["provider_options"] = options
+            if "metadata" in payload:
+                payload["metadata"] = dict(metadata)
+            containers = (payload, payload.get("metadata", {}), payload.get("provider_options", {}))
+            durations = set()
+            for container in containers:
+                for field in ("duration", "seconds"):
+                    if field not in container:
+                        continue
+                    value = container[field]
+                    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+                        raise ValueError("Video duration must be whole seconds between 1 and 3600")
+                    seconds = float(value)
+                    if not math.isfinite(seconds) or not seconds.is_integer() or not 1 <= seconds <= 3600:
+                        raise ValueError("Video duration must be whole seconds between 1 and 3600")
+                    durations.add(int(seconds))
+                    container[field] = str(int(seconds)) if field == "seconds" else int(seconds)
+            if len(durations) > 1:
+                raise ValueError("Conflicting video duration aliases")
+            for field in ("resolution", "size", "ratio", "generate_audio", "seed"):
+                values = [container[field] for container in containers if field in container]
+                for value in values:
+                    if field == "generate_audio":
+                        valid = isinstance(value, bool)
+                    elif field == "seed":
+                        valid = isinstance(value, int) and not isinstance(value, bool)
+                    else:
+                        valid = isinstance(value, str) and bool(value.strip())
+                    if not valid:
+                        raise ValueError("Invalid canonical video field: " + field)
+                if values and any(value != values[0] for value in values[1:]):
+                    raise ValueError("Conflicting video field: " + field)
             client = NewAPIClient(settings)
             with ExitStack() as files:
                 if references and references[0][0] == "file":
@@ -141,8 +206,6 @@ def execute_video(inputs, config_path=None):
                     fields = {name: json.dumps(value) if isinstance(value, (dict, list, bool)) else value for name, value in payload.items()}
                     receipt = client.request_json("POST", "/v1/videos", data=fields, files=multipart, deadline=deadline, receipt=True)
                 else:
-                    if references:
-                        payload = {"model": resolved.id, **merge_params(resolved, {**standard, reference_field: references[0][1]}, inputs.get("provider_params"))}
                     receipt = client.request_json("POST", "/v1/videos", json=payload, deadline=deadline, receipt=True)
             identifier = receipt.get("id")
             try:

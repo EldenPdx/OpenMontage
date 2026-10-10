@@ -136,7 +136,7 @@ def test_text_video_downloads_authenticated_content_and_persists_public_job(gate
         ("POST", "/v1/videos"), ("GET", "/v1/videos/video-public"),
         ("GET", "/v1/videos/video-public"), ("GET", "/v1/videos/video-public/content"),
     ]
-    assert calls[0][3] == {"model": "gateway-video", "prompt": "A blue room", "seconds": 4, "size": "1280x720", "seed": 0}
+    assert calls[0][3] == {"model": "gateway-video", "prompt": "A blue room", "seconds": "4", "size": "1280x720", "seed": 0}
     assert all(call[2]["Authorization"] == "Bearer fake-video-key" for call in calls)
     assert gateway["output"].read_bytes() == gateway["content"]
     assert result.data["video_width"] == 64 and result.data["video_height"] == 48
@@ -170,6 +170,55 @@ def test_non_sora_parameters_follow_deployment_profile_and_preserve_false(gatewa
     assert gateway["calls"][0][3] == fixture["non_sora_request"]
 
 
+def test_canonical_video_fields_and_declared_provider_options_reach_the_gateway(gateway):
+    profile = gateway["configuration"]["newapi"]["models"]["gateway-video"]
+    profile.update(
+        supported_parameters=["prompt", "duration", "ratio", "resolution", "generate_audio", "seed", "camera_fixed", "watermark", "metadata", "provider_options"],
+        parameter_map={}, limits={},
+    )
+    gateway["config_path"].write_text(yaml.safe_dump(gateway["configuration"]), encoding="utf-8")
+    result = execute(gateway, duration=5, aspect_ratio="16:9", resolution="720p", generate_audio=False, seed=0,
+                     provider_params={"camera_fixed": False, "watermark": True, "provider_options": {"draft": False}, "metadata": {"label": "reference-shot"}})
+    assert result.success, result.error
+    assert gateway["calls"][0][3] == {
+        "model": "gateway-video", "prompt": "A blue room", "duration": 5, "ratio": "16:9", "resolution": "720p",
+        "generate_audio": False, "seed": 0, "metadata": {"label": "reference-shot"},
+        "provider_options": {"draft": False, "camera_fixed": False, "watermark": True},
+    }
+
+
+def test_declared_structured_image_references_use_json_instead_of_a_multipart_upload(gateway):
+    profile = gateway["configuration"]["newapi"]["models"]["gateway-video"]
+    profile.update(supported_parameters=["prompt", "duration", "metadata"], parameter_map={}, limits={})
+    gateway["config_path"].write_text(yaml.safe_dump(gateway["configuration"]), encoding="utf-8")
+    content = [{"type": "image_url", "image_url": {"url": "https://media.example/reference.png"}, "role": "first_frame"}]
+    result = execute(gateway, operation="image_to_video", duration=5, metadata={"content": content})
+    assert result.success, result.error
+    assert gateway["calls"][0][3] == {"model": "gateway-video", "prompt": "A blue room", "duration": 5, "metadata": {"content": content}}
+    assert gateway["calls"][0][4] == {}
+
+
+def test_structured_reference_profile_does_not_imply_multipart_upload_support(gateway, tmp_path):
+    from PIL import Image
+    reference = tmp_path / "reference.png"
+    Image.new("RGB", (64, 48), "blue").save(reference)
+    profile = gateway["configuration"]["newapi"]["models"]["gateway-video"]
+    profile.update(supported_parameters=["prompt", "duration", "metadata"], parameter_map={}, limits={})
+    gateway["config_path"].write_text(yaml.safe_dump(gateway["configuration"]), encoding="utf-8")
+    result = execute(gateway, operation="image_to_video", duration=5, reference_image_path=str(reference))
+    assert not result.success
+    assert gateway["calls"] == []
+
+
+def test_native_string_seconds_respects_the_declared_profile_and_round_trips(gateway):
+    profile = gateway["configuration"]["newapi"]["models"]["gateway-video"]
+    profile["limits"]["seconds"] = {"type": "string", "enum": ["4", "8", "12"]}
+    gateway["config_path"].write_text(yaml.safe_dump(gateway["configuration"]), encoding="utf-8")
+    result = execute(gateway, seconds="4")
+    assert result.success, result.error
+    assert gateway["calls"][0][3] == {"model": "gateway-video", "prompt": "A blue room", "seconds": "4"}
+
+
 @pytest.mark.parametrize("parameters", [
     {"unknown_parameter": 1}, {"reference_video_url": "https://example.com/source.mp4"},
     {"duration": 4, "seconds": 5}, {"duration": 0},
@@ -180,6 +229,46 @@ def test_invalid_parameters_fail_before_a_billable_submission(gateway, parameter
     assert not result.success
     assert gateway["calls"] == []
     assert result.cost_usd is None
+
+
+@pytest.mark.parametrize("duration", [4.5, True, -1, 0, 3601, float("inf"), "4.5"])
+def test_video_duration_is_bounded_before_submission_even_without_profile_limits(gateway, duration):
+    gateway["configuration"]["newapi"]["models"]["gateway-video"].pop("limits")
+    gateway["config_path"].write_text(yaml.safe_dump(gateway["configuration"]), encoding="utf-8")
+    result = execute(gateway, duration=duration)
+    assert not result.success
+    assert gateway["calls"] == []
+
+
+@pytest.mark.parametrize("parameters", [
+    {"duration": 4, "seconds": 5},
+    {"duration": 4, "metadata": {"duration": 5}},
+    {"duration": 4, "provider_options": {"seconds": "5"}},
+    {"metadata": {"duration": 3601}},
+    {"provider_options": {"duration": 1.5}},
+    {"resolution": "720p", "metadata": {"resolution": "1080p"}},
+    {"generate_audio": False, "provider_options": {"generate_audio": True}},
+])
+def test_conflicting_billable_video_fields_cannot_bypass_canonical_values(gateway, parameters):
+    profile = gateway["configuration"]["newapi"]["models"]["gateway-video"]
+    profile.update(supported_parameters=["prompt", "duration", "seconds", "resolution", "generate_audio", "metadata", "provider_options"], parameter_map={}, limits={})
+    gateway["config_path"].write_text(yaml.safe_dump(gateway["configuration"]), encoding="utf-8")
+    result = execute(gateway, **parameters)
+    assert not result.success
+    assert gateway["calls"] == []
+
+
+@pytest.mark.parametrize("parameters", [
+    {"resolution": 720}, {"generate_audio": "false"}, {"seed": 1.5},
+    {"metadata": {"generate_audio": "false"}}, {"provider_options": {"ratio": ["16:9"]}},
+])
+def test_video_billable_fields_preserve_their_canonical_types(gateway, parameters):
+    profile = gateway["configuration"]["newapi"]["models"]["gateway-video"]
+    profile.update(supported_parameters=["prompt", "resolution", "generate_audio", "seed", "metadata", "provider_options"], parameter_map={}, limits={})
+    gateway["config_path"].write_text(yaml.safe_dump(gateway["configuration"]), encoding="utf-8")
+    result = execute(gateway, **parameters)
+    assert not result.success
+    assert gateway["calls"] == []
 
 
 def test_poll_timeout_preserves_job_and_resume_only_reads(gateway):

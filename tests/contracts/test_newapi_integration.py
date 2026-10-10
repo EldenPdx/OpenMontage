@@ -287,7 +287,7 @@ def test_video_selector_json_and_native_reference_produce_probed_authenticated_c
     assert result.success, result.error
     post = connected["calls"][1]
     assert post["path"] == "/gateway/v1/videos" and post["method"] == "POST"
-    assert post["body"] == {"model": "deployment-video", "prompt": "Rain", "seconds": "4" if local else 4, "size": "1280x720"}
+    assert post["body"] == {"model": "deployment-video", "prompt": "Rain", "seconds": "4", "size": "1280x720"}
     assert post["files"] == ([("input_reference", "reference.png", "image/png", PNG)] if local else [])
     assert [(call["method"], call["path"]) for call in connected["calls"][2:]] == [("GET", "/gateway/v1/videos/video-1"), ("GET", "/gateway/v1/videos/video-1"), ("GET", "/gateway/v1/videos/video-1/content")]
     assert all(call["headers"]["Authorization"] == "Bearer " + KEY for call in connected["calls"])

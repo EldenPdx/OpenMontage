@@ -108,6 +108,8 @@ def image_parameters(resolved, inputs, operation):
     if {name for name, path in uploads}.intersection(provider):
         raise ValueError("provider_params cannot override uploaded image or mask files")
     params = merge_params(resolved, standard, provider)
+    if isinstance(params.get("size"), str) and "×" in params["size"]:
+        raise ValueError("Image size must use 'x' instead of the multiplication sign '×'")
     if "parameters" in params:
         native = params["parameters"]
         if not isinstance(native, dict):
@@ -145,6 +147,40 @@ def image_parameters(resolved, inputs, operation):
     if operation == "generate" and json_refs:
         raise ValueError("Source images require generation_mode=edit")
     return params, uploads
+
+
+def image_entries(items):
+    # The gateway counts max(URL entries, Base64 entries). Keep two representations
+    # of the same image together, including providers that split them across entries.
+    entries, urls, encoded = [], [], []
+    skipped = 0
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            entries.append((index, item))
+            continue
+        has_url = isinstance(item.get("url"), str) and bool(item["url"])
+        has_encoded = isinstance(item.get("b64_json"), str) and bool(item["b64_json"])
+        if has_url and has_encoded:
+            entries.append((index, item))
+        elif has_url:
+            urls.append((index, item))
+        elif has_encoded:
+            encoded.append((index, item))
+        elif item.get("url") or item.get("b64_json"):
+            entries.append((index, item))
+        else:
+            skipped += 1
+    for ordinal in range(max(len(urls), len(encoded))):
+        pair = ([urls[ordinal]] if ordinal < len(urls) else []) + ([encoded[ordinal]] if ordinal < len(encoded) else [])
+        pair.sort(key=lambda entry: entry[0])
+        index = pair[0][0]
+        item = {"revised_prompt": next((entry.get("revised_prompt") for _, entry in pair if entry.get("revised_prompt")), None)}
+        if ordinal < len(urls):
+            item["url"] = urls[ordinal][1]["url"]
+        if ordinal < len(encoded):
+            item["b64_json"] = encoded[ordinal][1]["b64_json"]
+        entries.append((index, item))
+    return sorted(entries, key=lambda entry: entry[0]), skipped
 
 
 def execute_images(settings, inputs):
@@ -237,9 +273,9 @@ def execute_images(settings, inputs):
         output = Path(output_path)
         revised = []
         failures = []
-        skipped = 0
-        for index, item in enumerate(items):
-            target = output if index == 0 else output.with_name(f"{output.stem}_{index + 1}{output.suffix}")
+        entries, skipped = image_entries(items)
+        for index, item in entries:
+            target = output if not outputs else output.with_name(f"{output.stem}_{len(outputs) + 1}{output.suffix}")
             try:
                 if not isinstance(item, dict):
                     raise NewAPIError("invalid_response", "New API image entry must be an object")
