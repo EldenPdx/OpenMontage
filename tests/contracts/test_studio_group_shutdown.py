@@ -1,4 +1,5 @@
 import multiprocessing
+import errno
 import os
 import signal
 import select
@@ -113,4 +114,40 @@ def test_completed_tool_group_does_not_require_a_disappeared_pid_identity(tmp_pa
         if process.is_alive():
             process.kill()
             process.join(2)
+        parent.close()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Managed Studio processes require POSIX")
+@pytest.mark.parametrize("leader_exited", [False, True])
+def test_permission_denied_does_not_release_a_live_process_group(tmp_path, monkeypatch, leader_exited):
+    parent, child = multiprocessing.get_context("fork").Pipe()
+    process = multiprocessing.get_context("fork").Process(target=zombie_group, args=(child,), kwargs={"live_descendant": True})
+    process.start()
+    child.close()
+    actual_signal = os.killpg
+    try:
+        assert parent.poll(5)
+        parent.recv()
+        process.studio_identity = process_identity(process.pid)
+        if leader_exited:
+            os.kill(process.pid, signal.SIGKILL)
+            process.join(2)
+            assert not process.is_alive()
+        bridge = ProductionToolBridge(None, tmp_path, registry=ToolRegistry())
+        bridge.jobs["denied-tool"] = process
+        def denied(pid, sig):
+            if sig:
+                raise PermissionError(errno.EPERM, "Operation not permitted")
+            return actual_signal(pid, sig)
+        monkeypatch.setattr(os, "killpg", denied)
+        with pytest.raises(PermissionError):
+            bridge.stop()
+        assert "denied-tool" in bridge.jobs
+        actual_signal(process.pid, 0)
+    finally:
+        try:
+            actual_signal(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.join(2)
         parent.close()
