@@ -125,7 +125,7 @@ class ProductionToolBridge:
         try:
             os.killpg(process.pid, sig)
         except PermissionError:
-            process.join(0)
+            process.join(0.5)
             from production.recovery import _group_exists
             if process.is_alive() or _group_exists(process.pid):
                 raise

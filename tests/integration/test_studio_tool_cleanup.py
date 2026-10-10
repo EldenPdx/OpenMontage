@@ -14,7 +14,7 @@ from tests.integration.test_studio_repository import repository, repository_fact
 from tools.base_tool import BaseTool, ToolResult, ToolRuntime
 
 
-@pytest.mark.parametrize("fault", ["disappeared_lookup", "permission_after_exit"])
+@pytest.mark.parametrize("fault", ["disappeared_lookup", "permission_after_exit", "permission_before_exit"])
 def test_completed_render_receipt_survives_process_exit_races(repository, tmp_path, monkeypatch, fault):
     from production import recovery
     completion = multiprocessing.get_context("fork").Event()
@@ -27,7 +27,7 @@ def test_completed_render_receipt_survives_process_exit_races(repository, tmp_pa
         def execute(self, inputs):
             subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=64x48:r=10:d=0.3",
                             "-c:v", "libx264", "-pix_fmt", "yuv420p", inputs["output_path"]], capture_output=True, check=True, timeout=20)
-            if fault == "permission_after_exit":
+            if fault.startswith("permission_"):
                 threading.Thread(target=lambda: completion.wait(5), daemon=False).start()
             return ToolResult(success=True, data={"output_path": inputs["output_path"]}, cost_usd=0)
 
@@ -52,11 +52,14 @@ def test_completed_render_receipt_survives_process_exit_races(repository, tmp_pa
             if sig == signal.SIGTERM and not permission_denials:
                 process = bridge.jobs["completed-render"]
                 assert process.is_alive()
-                completion.set()
-                process.join(2)
-                assert process.exitcode == 0
-                with pytest.raises(ProcessLookupError):
-                    actual_signal(pid, 0)
+                if fault == "permission_before_exit":
+                    threading.Timer(0.1, completion.set).start()
+                else:
+                    completion.set()
+                    process.join(2)
+                    assert process.exitcode == 0
+                    with pytest.raises(ProcessLookupError):
+                        actual_signal(pid, 0)
                 permission_denials.append(pid)
                 raise PermissionError(errno.EPERM, "Operation not permitted")
             return actual_signal(pid, sig)
@@ -69,5 +72,5 @@ def test_completed_render_receipt_survives_process_exit_races(repository, tmp_pa
     assert repository.get_call("completed-render").status == "settled"
     assert list((tmp_path / "runtime/tool-processes").rglob("*.json")) == []
     assert bridge.stop() is True
-    if fault == "permission_after_exit":
+    if fault.startswith("permission_"):
         assert len(permission_denials) == 1
