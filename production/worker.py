@@ -49,6 +49,7 @@ class Worker:
             "Select an existing pipeline from the brief, read its manifest and initialize this task's project. "
             "For every stage read its director skill, and read Layer 3 skills before calling providers. "
             "Write schema-valid canonical artifacts and checkpoints through the bridge. "
+            "model_cost and media_cost are backend approval gates, never pipeline checkpoint stages; use the manifest and project checkpoints to determine pipeline progress. "
             "checkpoint.artifacts must contain complete JSON objects keyed by artifact name, never file paths or references. "
             "Stop this turn immediately after a checkpoint returns paused=true; only the browser can approve. "
             "On continue/resume read the supplied bootstrap.project; initialize with only title and pipeline_type if it is null. "
