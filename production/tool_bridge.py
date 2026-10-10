@@ -216,12 +216,17 @@ class ProductionToolBridge:
                 while not parent.poll():
                     self._capture_job(tool, inputs, call)
                     if not process.is_alive() or self.stopped.is_set():
+                        if process.exitcode == 0 and not self.stopped.is_set() and parent.poll():
+                            break
                         raise ContractViolation("Managed tool process was interrupted", "outcome_unknown")
                     if time.monotonic() >= next_check:
                         self.ready(call.context)
                         next_check = time.monotonic() + 0.5
                     await asyncio.sleep(0.05)
-                message = parent.recv()
+                try:
+                    message = parent.recv()
+                except EOFError:
+                    raise ContractViolation("Managed tool process ended without a result", "outcome_unknown") from None
                 self._capture_job(tool, inputs, call)
                 if "result" not in message:
                     raise ContractViolation("Managed tool execution failed", "outcome_unknown")
