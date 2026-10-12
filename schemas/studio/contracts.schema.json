@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "OpenMontage Studio v1",
+  "title": "Web Studio v1 public and internal contracts",
   "$defs": {
     "TaskCreate": {
       "additionalProperties": false,
@@ -50,6 +50,23 @@
         "brief"
       ],
       "title": "TaskCreate",
+      "type": "object"
+    },
+    "Actor": {
+      "additionalProperties": false,
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/UserIdentity"
+        },
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceContext"
+        }
+      },
+      "required": [
+        "identity",
+        "workspace"
+      ],
+      "title": "Actor",
       "type": "object"
     },
     "ApprovalBinding": {
@@ -447,7 +464,14 @@
             "forbidden",
             "rpc_error",
             "timeout",
-            "internal_error"
+            "internal_error",
+            "unauthenticated",
+            "csrf_invalid",
+            "auth_context_conflict",
+            "invitation_invalid",
+            "last_admin",
+            "invalid_cursor",
+            "identity_unavailable"
           ],
           "title": "Code",
           "type": "string"
@@ -560,6 +584,23 @@
       "title": "RenderResult",
       "type": "object"
     },
+    "ResourceOwnership": {
+      "additionalProperties": false,
+      "properties": {
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceContext"
+        },
+        "creator": {
+          "$ref": "#/$defs/UserIdentity"
+        }
+      },
+      "required": [
+        "workspace",
+        "creator"
+      ],
+      "title": "ResourceOwnership",
+      "type": "object"
+    },
     "TaskState": {
       "enum": [
         "queued",
@@ -574,6 +615,61 @@
       ],
       "title": "TaskState",
       "type": "string"
+    },
+    "UserIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "user_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "User Id",
+          "type": "string"
+        },
+        "issuer": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Issuer",
+          "type": "string"
+        },
+        "sub": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Sub",
+          "type": "string"
+        }
+      },
+      "required": [
+        "user_id",
+        "issuer",
+        "sub"
+      ],
+      "title": "UserIdentity",
+      "type": "object"
+    },
+    "WorkspaceContext": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "personal",
+            "organization"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "owner_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Owner Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "owner_id"
+      ],
+      "title": "WorkspaceContext",
+      "type": "object"
     },
     "TaskRecord": {
       "additionalProperties": false,
@@ -681,6 +777,28 @@
           ],
           "default": null,
           "title": "Updated At"
+        },
+        "ownership": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResourceOwnership"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Actor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -691,53 +809,795 @@
         "config_snapshot"
       ],
       "title": "TaskRecord",
-      "type": "object",
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "state": {
-                "const": "succeeded"
-              }
-            },
-            "required": [
-              "state"
-            ]
-          },
-          "then": {
-            "properties": {
-              "result": {
-                "$ref": "#/$defs/RenderResult"
-              }
-            },
-            "required": [
-              "result"
-            ]
-          }
+      "type": "object"
+    },
+    "PublicActor": {
+      "additionalProperties": false,
+      "properties": {
+        "user_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "User Id",
+          "type": "string"
         },
-        {
-          "if": {
-            "properties": {
-              "state": {
-                "const": "awaiting_approval"
-              }
-            },
-            "required": [
-              "state"
-            ]
-          },
-          "then": {
-            "properties": {
-              "approval": {
-                "$ref": "#/$defs/ApprovalRequest"
-              }
-            },
-            "required": [
-              "approval"
-            ]
-          }
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceContext"
         }
-      ]
+      },
+      "required": [
+        "user_id",
+        "workspace"
+      ],
+      "title": "PublicActor",
+      "type": "object"
+    },
+    "PublicResourceOwnership": {
+      "additionalProperties": false,
+      "properties": {
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceContext"
+        },
+        "creator": {
+          "$ref": "#/$defs/PublicUserReference"
+        }
+      },
+      "required": [
+        "workspace",
+        "creator"
+      ],
+      "title": "PublicResourceOwnership",
+      "type": "object"
+    },
+    "PublicUserReference": {
+      "additionalProperties": false,
+      "properties": {
+        "user_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "User Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "user_id"
+      ],
+      "title": "PublicUserReference",
+      "type": "object"
+    },
+    "PublicTaskRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "task_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Task Id",
+          "type": "string"
+        },
+        "project_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "run_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/$defs/TaskState",
+          "default": "queued"
+        },
+        "request": {
+          "$ref": "#/$defs/TaskCreate"
+        },
+        "config_snapshot": {
+          "$ref": "#/$defs/ConfigSnapshot"
+        },
+        "current_stage": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Current Stage"
+        },
+        "approval": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalRequest"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "cost": {
+          "$ref": "#/$defs/CostSnapshot"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ErrorDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RenderResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "created_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created At"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Updated At"
+        },
+        "ownership": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PublicResourceOwnership"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PublicActor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "task_id",
+        "project_id",
+        "run_id",
+        "request",
+        "config_snapshot"
+      ],
+      "title": "PublicTaskRecord",
+      "type": "object"
+    },
+    "AuthContext": {
+      "additionalProperties": false,
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/UserIdentity"
+        },
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceContext"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "enum": [
+                "admin",
+                "editor",
+                "viewer",
+                "personal"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Role"
+        },
+        "permissions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Permissions",
+          "type": "array"
+        },
+        "context_id": {
+          "title": "Context Id",
+          "type": "string"
+        },
+        "session_ref": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Session Ref",
+          "type": "string"
+        },
+        "authority_verified_at": {
+          "format": "date-time",
+          "title": "Authority Verified At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "identity",
+        "workspace",
+        "role",
+        "permissions",
+        "context_id",
+        "session_ref",
+        "authority_verified_at"
+      ],
+      "title": "AuthContext",
+      "type": "object"
+    },
+    "AuthSession": {
+      "additionalProperties": false,
+      "properties": {
+        "session_ref": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Session Ref",
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/$defs/UserIdentity"
+        },
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceContext"
+        },
+        "context_id": {
+          "title": "Context Id",
+          "type": "string"
+        },
+        "csrf_hash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Csrf Hash",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "absolute_expires_at": {
+          "format": "date-time",
+          "title": "Absolute Expires At",
+          "type": "string"
+        },
+        "idle_expires_at": {
+          "format": "date-time",
+          "title": "Idle Expires At",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 1,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "authority_verified_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Authority Verified At"
+        }
+      },
+      "required": [
+        "session_ref",
+        "identity",
+        "workspace",
+        "context_id",
+        "csrf_hash",
+        "created_at",
+        "absolute_expires_at",
+        "idle_expires_at",
+        "revision"
+      ],
+      "title": "AuthSession",
+      "type": "object"
+    },
+    "OrganizationDTO": {
+      "additionalProperties": false,
+      "properties": {
+        "organization_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Organization Id",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "roles": {
+          "items": {
+            "enum": [
+              "admin",
+              "editor",
+              "viewer"
+            ],
+            "type": "string"
+          },
+          "title": "Roles",
+          "type": "array"
+        }
+      },
+      "required": [
+        "organization_id",
+        "name",
+        "roles"
+      ],
+      "title": "OrganizationDTO",
+      "type": "object"
+    },
+    "MemberDTO": {
+      "additionalProperties": false,
+      "properties": {
+        "user_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "User Id",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "email": {
+          "anyOf": [
+            {
+              "maxLength": 320,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Email"
+        },
+        "roles": {
+          "items": {
+            "enum": [
+              "admin",
+              "editor",
+              "viewer"
+            ],
+            "type": "string"
+          },
+          "title": "Roles",
+          "type": "array"
+        }
+      },
+      "required": [
+        "user_id",
+        "roles"
+      ],
+      "title": "MemberDTO",
+      "type": "object"
+    },
+    "InvitationDTO": {
+      "additionalProperties": false,
+      "properties": {
+        "invitation_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Invitation Id",
+          "type": "string"
+        },
+        "organization_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Organization Id",
+          "type": "string"
+        },
+        "email": {
+          "maxLength": 320,
+          "minLength": 1,
+          "title": "Email",
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "admin",
+            "editor",
+            "viewer"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "status": {
+          "default": "pending",
+          "enum": [
+            "pending",
+            "accepted",
+            "cancelled",
+            "expired"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "expires_at": {
+          "format": "date-time",
+          "title": "Expires At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "invitation_id",
+        "organization_id",
+        "email",
+        "role",
+        "expires_at"
+      ],
+      "title": "InvitationDTO",
+      "type": "object"
+    },
+    "OperationScope": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "$ref": "#/$defs/Actor"
+        },
+        "operation": {
+          "enum": [
+            "organization:create",
+            "invitation:create",
+            "invitation:cancel",
+            "invitation:accept",
+            "member:role",
+            "member:remove"
+          ],
+          "title": "Operation",
+          "type": "string"
+        },
+        "resource_id": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Resource Id",
+          "type": "string"
+        },
+        "idempotency_key": {
+          "maxLength": 128,
+          "minLength": 8,
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "title": "Idempotency Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "actor",
+        "operation",
+        "resource_id",
+        "idempotency_key"
+      ],
+      "title": "OperationScope",
+      "type": "object"
+    },
+    "OrganizationOperationResult": {
+      "additionalProperties": false,
+      "properties": {
+        "status_code": {
+          "enum": [
+            200,
+            201,
+            204,
+            409,
+            422,
+            503
+          ],
+          "title": "Status Code",
+          "type": "integer"
+        },
+        "body": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OrganizationDTO"
+            },
+            {
+              "$ref": "#/$defs/MemberDTO"
+            },
+            {
+              "$ref": "#/$defs/InvitationDTO"
+            },
+            {
+              "$ref": "#/$defs/ErrorDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Body"
+        }
+      },
+      "required": [
+        "status_code"
+      ],
+      "title": "OrganizationOperationResult",
+      "type": "object"
+    },
+    "OrganizationOperationTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "organization_id": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Organization Id"
+        },
+        "user_id": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "User Id"
+        },
+        "invitation_id": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Invitation Id"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "email": {
+          "anyOf": [
+            {
+              "maxLength": 320,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Email"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "enum": [
+                "admin",
+                "editor",
+                "viewer"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        }
+      },
+      "title": "OrganizationOperationTarget",
+      "type": "object"
+    },
+    "SafeRemoteRefs": {
+      "additionalProperties": false,
+      "properties": {
+        "organization_id": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Organization Id"
+        },
+        "invitation_id": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Invitation Id"
+        },
+        "user_id": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "User Id"
+        }
+      },
+      "title": "SafeRemoteRefs",
+      "type": "object"
+    },
+    "OrganizationIntent": {
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Operation Id",
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/OperationScope"
+        },
+        "request_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Request Sha256",
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/OrganizationOperationTarget"
+        },
+        "organization_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Organization Id"
+        },
+        "stage": {
+          "default": "prepared",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
+          "title": "Stage",
+          "type": "string"
+        },
+        "status": {
+          "default": "prepared",
+          "enum": [
+            "prepared",
+            "submitted",
+            "recovery_required",
+            "committed",
+            "failed"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "revision": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "remote_refs": {
+          "$ref": "#/$defs/SafeRemoteRefs"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OrganizationOperationResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "created_at": {
+          "title": "Created At",
+          "type": "string"
+        },
+        "updated_at": {
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation_id",
+        "scope",
+        "request_sha256",
+        "target",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "OrganizationIntent",
+      "type": "object"
     },
     "ApprovalDecision": {
       "additionalProperties": false,
@@ -830,6 +1690,28 @@
     "TaskCommand": {
       "additionalProperties": false,
       "properties": {
+        "ownership": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResourceOwnership"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Actor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "command_id": {
           "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
           "title": "Command Id",
@@ -927,6 +1809,28 @@
     "RunContext": {
       "additionalProperties": false,
       "properties": {
+        "ownership": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResourceOwnership"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Actor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "task_id": {
           "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$",
           "title": "Task Id",
@@ -1180,28 +2084,7 @@
         "price_status"
       ],
       "title": "CallIntent",
-      "type": "object",
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "status": {
-                "const": "outcome_unknown"
-              }
-            },
-            "required": [
-              "status"
-            ]
-          },
-          "then": {
-            "properties": {
-              "actual_usd_micros": {
-                "type": "null"
-              }
-            }
-          }
-        }
-      ]
+      "type": "object"
     },
     "FileWriteIntent": {
       "additionalProperties": false,

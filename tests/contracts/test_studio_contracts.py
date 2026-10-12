@@ -173,3 +173,35 @@ def test_frozen_media_configuration_has_a_valid_sha256_and_is_backend_only():
 def test_empty_or_invalid_unicode_brief_fails_at_the_submission_boundary(brief):
     with pytest.raises(ValidationError):
         TaskCreate(brief=brief)
+
+
+def test_owned_public_task_has_truthful_schema_and_private_identity_remains_strict():
+    import json
+    from pathlib import Path
+    from jsonschema import Draft202012Validator
+    from production.contracts import Actor, ConfigSnapshot, PublicTaskRecord, ResourceOwnership, TaskRecord, UserIdentity, WorkspaceContext
+    identity = UserIdentity(user_id="user-a", issuer="https://identity.example.test/oidc", sub="private-subject")
+    workspace = WorkspaceContext(kind="personal", owner_id="user-a")
+    task = TaskRecord(task_id="task-a", project_id="project-a", run_id="run-a", request=TaskCreate(brief="A public production"),
+                      config_snapshot=ConfigSnapshot(profile_id="local", provider="local", model="test-model", api="openai-responses", configuration_sha256="a" * 64),
+                      ownership=ResourceOwnership(workspace=workspace, creator=identity), actor=Actor(identity=identity, workspace=workspace))
+    public = task.public_dict()
+    assert PublicTaskRecord.model_validate(public).ownership.creator.user_id == "user-a"
+    schema = json.loads((Path(__file__).resolve().parents[2] / "schemas/studio/contracts.schema.json").read_text())
+    Draft202012Validator({**schema, "$ref": "#/$defs/PublicTaskRecord"}).validate(public)
+    assert public["actor"] == {"user_id": "user-a", "workspace": workspace.model_dump()}
+    forbidden = {"issuer", "sub", "session_ref", "session", "access_token", "refresh_token", "idToken", "refreshToken", "accessTokenMap"}
+    def safe(value):
+        if isinstance(value, dict):
+            assert not value.keys() & forbidden
+            for item in value.values():
+                safe(item)
+        elif isinstance(value, list):
+            for item in value:
+                safe(item)
+    safe(public)
+    assert TaskRecord.model_validate(task.model_dump(mode="json", context={"persistence": True})).ownership.creator == identity
+    with pytest.raises(ValidationError):
+        TaskRecord.model_validate(public)
+    with pytest.raises(ValidationError):
+        UserIdentity(user_id="user-a")
