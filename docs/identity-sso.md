@@ -36,7 +36,9 @@ Preparation/check is explicitly structural. It does not certify live activation 
 
 ## One-time native processing
 
-The native SAML request is recorded before its IdP URL is issued. Samlify validates the response signature, issuer and supported time checks; its signature-verified Assertion shortcut supplies the stable assertion identifier. A PostgreSQL statement locks an unexpired pending request, inserts a tenant-scoped unique assertion identifier hash and conditionally marks the request consumed. Concurrent delivery has one winner. A consumed response is not reopened after downstream failure or an unknown result. Database failures deny authentication. The outer BFF independently retains its existing one-time state/nonce/PKCE, private SDK storage and authoritative workspace checks.
+The native SAML request is recorded before its IdP URL is issued. Samlify validates the response signature, issuer and supported time checks; its signature-verified Assertion shortcut supplies the assertion identifier, Audience and bearer confirmation. The local policy requires the bearer method, an unexpired bearer timestamp, and the expected recipient. A PostgreSQL statement locks an unexpired pending request, compares the signed Audience/Recipient/request correlation and the response headers with the recorded SP/ACS/request values, checks expiry against database time, inserts a tenant-scoped unique assertion identifier hash and conditionally marks the request consumed. Response headers constrain the original request; they do not establish identity. Concurrent delivery has one winner. A consumed response is not reopened after downstream failure or an unknown result. Database failures deny authentication. The outer BFF independently retains its existing one-time state/nonce/PKCE, private SDK storage and authoritative workspace checks.
+
+The supported local SP profile has one Audience value and one bearer SubjectConfirmation. Additional SAML profiles require explicit configuration acceptance. IdP-initiated SSO is outside this implementation.
 
 ## Required acceptance
 
