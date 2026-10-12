@@ -90,7 +90,7 @@ Import `load_fixture`, `seed_fixture` and `cleanup_fixture` from `tests.fixtures
 | `.app_for_origin(origin)` | Idempotent exact Traditional-web callback registration; returns configuration without the secret. |
 | `.send_invitation`, `.cancel_invitation`, `.mail_ids`, `.wait_for_mail` | Real Logto invitation and local mailbox flow; received message bodies contain verification codes/links and remain private. |
 
-Four real Logto users provide distinct identities and personal-space test subjects; personal space itself does not require an organization:
+The real Logto fixture provides four users with frozen grants and one subject without an email; personal space itself does not require an organization:
 
 | Alias | Authoritative organization grants |
 | --- | --- |
@@ -98,6 +98,9 @@ Four real Logto users provide distinct identities and personal-space test subjec
 | `u2` | B admin |
 | `cross` | A editor, B viewer |
 | `viewer` | A viewer |
+| `unverified` | No organization or email; username/password subject for invitation email-verification denials |
+
+The `unverified` subject needs `username_only_sign_up(fixture)` during its real login because the default email sign-up setting requires profile completion. This is an exclusive shared configuration test window: pause other sign-in/register/reset tests, then restore the original sign-in/sign-up settings in `finally`. A private pending journal prevents overlapping windows and remains for operator recovery if restoration fails. Email registration and reset still use the normal verified-email configuration.
 
 The shared templates grant viewer `resource:read` and `organization:read`; editor adds `production:create`, `production:approve`, `production:cancel` and `production:resume`; admin adds `organization:manage`. The exact sets are `CAPABILITIES` in `tests/fixtures/identity/environment.py`; BFF enforcement remains governed by the identity contracts.
 

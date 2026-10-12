@@ -1,5 +1,6 @@
 """Logto's public Management API and private fixture ledger for local acceptance."""
 
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 import json
 import os
@@ -221,6 +222,30 @@ def load_fixture(path=None):
     return IdentityFixture(path, value)
 
 
+@contextmanager
+def username_only_sign_up(fixture):
+    """Exclusive real-login test window; restore the shared profile before returning."""
+    api = fixture.api
+    current = api.request("GET", "/api/sign-in-exp")
+    original = {key: current[key] for key in ("signIn", "signUp")}
+    journal = fixture.path.with_name("sign-up-window.pending.json")
+    descriptor = os.open(journal, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w") as stream:
+        json.dump(original, stream)
+        stream.flush()
+        os.fsync(stream.fileno())
+    try:
+        api.request("PATCH", "/api/sign-in-exp", {"signUp": {
+            "identifiers": ["username"], "password": True, "verify": False}})
+        yield
+    finally:
+        api.request("PATCH", "/api/sign-in-exp", original)
+        restored = api.request("GET", "/api/sign-in-exp")
+        if any(restored[key] != value for key, value in original.items()):
+            raise RuntimeError("Shared sign-in profile was not restored; retain the private recovery journal")
+        journal.unlink()
+
+
 def seed_fixture(state=DEFAULT_STATE, *, namespace="auth24", origin="http://127.0.0.1:4760"):
     state = Path(state)
     if not re.fullmatch(r"[a-z][a-z0-9-]{0,30}", namespace):
@@ -258,14 +283,17 @@ def seed_fixture(state=DEFAULT_STATE, *, namespace="auth24", origin="http://127.
             "organizationScopeIds": [scope_ids[capability] for capability in capabilities]})
         api.request("PUT", "/api/organization-roles/" + role["id"] + "/scopes", {"organizationScopeIds": [scope_ids[c] for c in capabilities]})
         data["roles"][name] = role["id"]
-    for alias in ("u1", "u2", "cross", "viewer"):
+    for alias in ("u1", "u2", "cross", "viewer", "unverified"):
         username = namespace.replace("-", "_") + "_" + alias
         password = data["users"].get(alias, {}).get("password") or "Aa9-" + secrets.token_urlsafe(24)
-        email = namespace + "." + alias + "@openmontage.test"
+        email = "" if alias == "unverified" else namespace + "." + alias + "@openmontage.test"
         data["users"][alias] = {"id": data["users"].get(alias, {}).get("id"), "username": username, "email": email, "password": password}
         persist()
-        user = reconcile("/api/users", username, {"username": username, "primaryEmail": email, "password": password,
-            "name": namespace + " " + alias, "customData": {"auth24": namespace}}, key="username")
+        payload = {"username": username, "password": password,
+            "name": namespace + " " + alias, "customData": {"auth24": namespace}}
+        if email:
+            payload["primaryEmail"] = email
+        user = reconcile("/api/users", username, payload, key="username")
         data["users"][alias] = {"id": user["id"], "username": username, "email": email, "password": password}
         persist()
     for alias in ("A", "B"):
