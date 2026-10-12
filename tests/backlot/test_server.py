@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import re
 import time
 from pathlib import Path
 
@@ -160,6 +162,95 @@ class TestBacklotServerApi:
         passthrough = client.get("/thumb/film/artifacts/note.txt")
         assert passthrough.status_code == 200
         assert passthrough.content == b"hello"
+
+
+class TestBacklotPageRoutes:
+    @pytest.mark.parametrize("query", ["", "?static=1&tag=a%2Fb&tag=c+d&empty="])
+    def test_root_redirects_to_default_locale_preserving_query(self, client, query):
+        response = client.get(f"/{query}", follow_redirects=False)
+
+        assert response.status_code == 307
+        assert response.headers["location"] == f"/zh{query}"
+
+    @pytest.mark.parametrize("path", ["/studio", "/p/film", "/p/team/film", "/p/a%20b%3Ftake%23one"])
+    @pytest.mark.parametrize("query", ["", "?static=1&tag=a%2Fb&tag=c+d&empty="])
+    def test_legacy_pages_redirect_to_default_locale_preserving_path_and_query(self, client, path, query):
+        response = client.get(f"{path}{query}", follow_redirects=False)
+
+        assert response.status_code == 307
+        assert response.headers["location"] == f"/zh{path}{query}"
+
+    def test_legacy_project_redirect_encodes_literal_unicode(self, client):
+        response = client.get("/p/项目/映像?static=1", follow_redirects=False)
+
+        assert response.status_code == 307
+        assert response.headers["location"] == "/zh/p/%E9%A1%B9%E7%9B%AE/%E6%98%A0%E5%83%8F?static=1"
+
+    @pytest.mark.parametrize("locale", ["zh", "ja", "en"])
+    @pytest.mark.parametrize(
+        ("path", "script"),
+        [("", "library.js"), ("/studio", "studio.js"), ("/p/film", "board.js"), ("/p/team/film", "board.js")],
+    )
+    def test_localized_pages_serve_requested_language(self, client, locale, path, script):
+        response = client.get(f"/{locale}{path}?static=1", follow_redirects=False)
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/html")
+        assert response.headers.get("cache-control") == "no-cache"
+        assert re.search(rf'<html\b[^>]*\blang="{locale}"', response.text)
+        assert f"/ui/{script}?v=" in response.text
+
+    @pytest.mark.parametrize("locale", ["fr", "EN", "zh-CN", "ja-JP"])
+    @pytest.mark.parametrize("path", ["", "/studio", "/p/film", "/p/team/film"])
+    def test_unsupported_locales_are_not_pages(self, client, locale, path):
+        response = client.get(f"/{locale}{path}", follow_redirects=False)
+
+        assert response.status_code == 404
+
+    @pytest.mark.parametrize(
+        ("url", "template", "assets"),
+        [
+            ("/en", "index.html", ("board.css", "library.js", "i18n.css")),
+            ("/ja/studio", "studio.html", ("board.css", "studio.css", "studio.js", "i18n.css")),
+            ("/zh/p/team/film", "board.html", ("board.css", "board.js", "board-controls.css", "i18n.css")),
+        ],
+    )
+    def test_localized_pages_version_styles_and_scripts(self, client, tmp_path, monkeypatch, url, template, assets):
+        ui = tmp_path / "ui"
+        ui.mkdir()
+        html = (server_mod.UI_DIR / template).read_text(encoding="utf-8")
+        html = html.replace("</head>", '<link rel="stylesheet" href="/ui/i18n.css">\n</head>')
+        (ui / template).write_text(html, encoding="utf-8")
+        for asset in assets:
+            (ui / asset).write_text("/* test asset */", encoding="utf-8")
+            os.utime(ui / asset, (1700000000, 1700000000))
+        monkeypatch.setattr(server_mod, "UI_DIR", ui)
+
+        response = client.get(url)
+
+        assert response.status_code == 200
+        for asset in assets:
+            assert f"/ui/{asset}?v=1700000000" in response.text
+        os.utime(ui / "i18n.css", (1700000001, 1700000001))
+        refreshed = client.get(url)
+        assert "/ui/i18n.css?v=1700000001" in refreshed.text
+        assert "/ui/i18n.css?v=1700000000" not in refreshed.text
+
+    @pytest.mark.parametrize("asset", ["lib.js", "i18n.js"])
+    def test_shared_ui_modules_keep_conditional_cache_validation(self, client, asset):
+        response = client.get(f"/ui/{asset}")
+
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "no-cache"
+        revalidated = client.get(f"/ui/{asset}", headers={"If-None-Match": response.headers["etag"]})
+        assert revalidated.status_code == 304
+        assert revalidated.headers["cache-control"] == "no-cache"
+
+    def test_static_ui_namespace_keeps_trailing_slash_redirect(self, client):
+        response = client.get("/ui", follow_redirects=False)
+
+        assert response.status_code == 307
+        assert response.headers["location"] == "http://testserver/ui/"
 
 
 class TestBacklotPerformanceBudgets:

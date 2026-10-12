@@ -65,7 +65,7 @@ def test_browser_submits_revises_approves_plays_and_downloads_real_local_video(t
                 page.on("pageerror", lambda error: page_errors.append(str(error)))
                 page.route("**/*", lambda route: route.continue_() if route.request.url.startswith(base_url) else route.abort())
                 try:
-                    page.goto(base_url + "/studio")
+                    page.goto(base_url + "/en/studio")
                     page.locator("#brief").fill("A two second animation of a blue lighthouse")
                     page.locator("#profile").select_option("local")
                     page.locator("#duration").fill("2")
@@ -76,7 +76,7 @@ def test_browser_submits_revises_approves_plays_and_downloads_real_local_video(t
                     assert created.value.status == 202
                     task = created.value.json()
                     expect(page.locator("#current-task")).to_contain_text(task["task_id"])
-                    page.locator("#current-task a[href^='/p/']").click()
+                    page.locator("#current-task a[href^='/en/p/']").click()
 
                     gates = []
                     for stage, decision in (("proposal", "approve"), ("script", "revise"),

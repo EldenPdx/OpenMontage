@@ -171,12 +171,12 @@ def run_interactions(capture_dir: Path) -> dict[str, Any]:
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 1560, "height": 1000})
-        page.goto(f"http://127.0.0.1:{PORT}/p/the-last-lighthouse?static=1")
+        page.goto(f"http://127.0.0.1:{PORT}/en/p/the-last-lighthouse?static=1")
         page.wait_for_selector(".stage")
         page.locator(".stage").first.click()
         page.wait_for_selector(".drawer")
         drawer_text = page.locator(".drawer").inner_text()
-        if "research" not in drawer_text:
+        if "research" not in drawer_text.lower():
             raise RuntimeError("stage drawer did not open")
         page.locator(".script-card").first.click()
         page.wait_for_selector(".modal-bg.open")

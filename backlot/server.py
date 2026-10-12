@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from backlot.state import PROJECTS_DIR, REPO_ROOT, list_projects, load_board_state, summarize_project
@@ -30,14 +31,17 @@ _IGNORE_PARTS = {"node_modules", ".git", "__pycache__", ".cache"}
 SSE_HEARTBEAT_SECONDS = 15
 
 
-def _ui_html(name: str, assets: tuple[str, ...]) -> HTMLResponse:
+def _ui_html(name: str, assets: tuple[str, ...], locale: str) -> HTMLResponse:
+    if locale not in {"zh", "ja", "en"}:
+        raise HTTPException(status_code=404, detail="unsupported locale")
     html = (UI_DIR / name).read_text(encoding="utf-8")
+    html = re.sub(r'(<html\b[^>]*\blang=")[^"]*', rf"\g<1>{locale}", html, count=1)
     for asset in assets:
         path = UI_DIR / asset
         if path.is_file():
             version = str(int(path.stat().st_mtime))
             html = html.replace(f"/ui/{asset}", f"/ui/{asset}?v={version}")
-    return HTMLResponse(html)
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 
 class ChangeHub:
@@ -283,24 +287,31 @@ def create_app(*, studio_repository=None, studio_config=None, studio_environment
 
     # ---- UI ------------------------------------------------------------
 
-    @app.get("/p/{project_id}")
-    async def board_page(project_id: str) -> HTMLResponse:
-        return _ui_html("board.html", ("board.css", "board.js", "board-controls.css"))
-
     @app.get("/p/{project_path:path}")
-    async def board_page_path(project_path: str) -> HTMLResponse:
-        return _ui_html("board.html", ("board.css", "board.js", "board-controls.css"))
-
     @app.get("/studio")
-    async def studio_page() -> HTMLResponse:
-        return _ui_html("studio.html", ("board.css", "studio.css", "studio.js"))
-
     @app.get("/")
-    async def library_page() -> HTMLResponse:
-        return _ui_html("index.html", ("board.css", "library.js"))
+    async def legacy_page(request: Request) -> RedirectResponse:
+        path = request.scope["raw_path"].decode("ascii")
+        target = "/zh" + (path if path != "/" else "")
+        query = request.scope["query_string"].decode("ascii")
+        return RedirectResponse(target + (f"?{query}" if query else ""))
 
     if UI_DIR.is_dir():
         app.mount("/ui", StaticFiles(directory=UI_DIR), name="ui")
+
+    @app.get("/{locale}/p/{project_path:path}")
+    async def board_page(locale: str, project_path: str) -> HTMLResponse:
+        return _ui_html("board.html", ("board.css", "board.js", "board-controls.css", "i18n.css"), locale)
+
+    @app.get("/{locale}/studio")
+    async def studio_page(locale: str) -> HTMLResponse:
+        return _ui_html("studio.html", ("board.css", "studio.css", "studio.js", "i18n.css"), locale)
+
+    @app.get("/zh")
+    @app.get("/ja")
+    @app.get("/en")
+    async def library_page(request: Request) -> HTMLResponse:
+        return _ui_html("index.html", ("board.css", "library.js", "i18n.css"), request.url.path.lstrip("/"))
 
     # The board is a long-lived SPA: a tab keeps running whatever board.js it
     # loaded, and browsers heuristically cache /ui assets. no-cache forces a

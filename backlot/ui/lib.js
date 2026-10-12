@@ -1,4 +1,5 @@
 // Shared helpers for the Backlot UI.
+import { t, getLocale } from "/ui/i18n.js";
 
 export async function getJSON(url) {
   const res = await fetch(url);
@@ -32,22 +33,23 @@ export function fmtDuration(seconds) {
 export function fmtMoney(v) {
   const n = Number(v);
   if (v == null || !Number.isFinite(n)) return "—";
-  return `$${n.toFixed(2)}`;
+  return new Intl.NumberFormat(getLocale(), { style: "currency", currency: "USD" }).format(n);
 }
 
 export function fmtAgo(epochSeconds) {
   if (!epochSeconds) return "";
   const diff = Date.now() / 1000 - epochSeconds;
-  if (diff < 90) return "just now";
-  if (diff < 3600) return `${Math.round(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.round(diff / 3600)}h ago`;
-  return `${Math.round(diff / 86400)}d ago`;
+  if (diff < 90) return t("just now");
+  const formatter = new Intl.RelativeTimeFormat(getLocale(), { style: "short" });
+  if (diff < 3600) return formatter.format(-Math.round(diff / 60), "minute");
+  if (diff < 86400) return formatter.format(-Math.round(diff / 3600), "hour");
+  return formatter.format(-Math.round(diff / 86400), "day");
 }
 
 export function fmtClock(iso) {
   if (!iso) return "";
   try {
-    return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    return new Date(iso).toLocaleTimeString(getLocale(), { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   } catch {
     return "";
   }

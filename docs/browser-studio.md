@@ -152,12 +152,29 @@ STUDIO_ENABLED=1 .venv/bin/python -m uvicorn backlot.server:app --host 127.0.0.1
 STUDIO_ENABLED=1 .venv/bin/python -m production worker
 ```
 
-Open `http://127.0.0.1:4751/studio`. Enter a description, select an available
+Open `http://127.0.0.1:4751/zh/studio`. Enter a description, select an available
 profile, duration, aspect ratio and budget. Submission commits a queued task;
 it does not claim a video exists. The worker owns the real Pi process, so closing
 the browser does not stop execution. Studio needs PostgreSQL, the installed Pi,
 and configured backend credentials; its readiness response explains missing
 dependencies. The original Backlot library and CLI remain usable independently.
+
+The library, Studio, and production boards support Simplified Chinese (`zh`,
+the default), Japanese (`ja`), and English (`en`). Use the language tabs in the
+page header or open `/zh`, `/ja`, `/en`, `/{language}/studio`, or
+`/{language}/p/{project-id}` directly. Switching tabs updates the URL while
+preserving the page, query parameters, fragment, and unsent form input.
+The tabs support arrow keys, Home, and End, and label one focusable content
+panel. Browser history restores both the language and tab focus.
+Unprefixed page URLs redirect to Chinese; API, media, and static asset paths
+keep their existing URLs. User briefs, project titles, generated artifacts,
+and provider/model identifiers retain their original content.
+
+Translations live beside the pages in `backlot/ui/*-i18n.js`; the shared
+`i18n.js` module uses English messages as keys and fallback text, with native
+`Intl` formatters for dates, relative times, and currency. The platform needs
+no additional frontend dependencies or build step. Add both Chinese and
+Japanese entries when adding a built-in interface message.
 
 The initial Studio tool boundary supports fixed FFmpeg media operations and
 configured New API image/video models. It runs on POSIX hosts, including the

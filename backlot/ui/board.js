@@ -1,10 +1,14 @@
-import { studioConfig, studioAction, subscribeTask, stateLabel, moneyMicros, costLabel, localURL } from "/ui/studio.js";
+import { studioConfig, studioAction, subscribeTask, stateLabel, moneyMicros, localURL } from "/ui/studio.js";
+import { t, getLocale, localePath, initI18n, languageTabs } from "/ui/i18n.js";
+import "/ui/board-i18n.js";
 // Backlot project board — renders BoardState and stays live via SSE.
 
 import {
   STAGE_ICONS, el, fmtAgo, fmtClock, fmtDuration, fmtMoney,
   getJSON, mediaURL, subscribe, thumbURL, waveBars,
 } from "/ui/lib.js";
+
+initI18n();
 
 const rawProjectPath = location.pathname.split("/p/")[1] || "";
 const projectId = decodeURIComponent(rawProjectPath);
@@ -26,6 +30,24 @@ let studioAvailable = true;
 let studioMessage = "";
 const studioDrafts = new Map();
 let firstPaint = true;
+let refreshModal = null;
+let loadError = null;
+
+const STAGE_LABELS = {
+  research: "research", proposal: "proposal", idea: "idea", script: "script",
+  scene_plan: "scene plan", assets: "assets", edit: "edit", compose: "compose",
+  publish: "publish", model_cost: "model cost", media_cost: "media cost",
+  character_design: "character design", rig_plan: "rig plan",
+};
+
+function stageLabel(name) {
+  return Object.hasOwn(STAGE_LABELS, name) ? t(STAGE_LABELS[name]) : name;
+}
+
+function fmtDateTime(iso) {
+  const time = ts(iso);
+  return time == null ? "" : new Intl.DateTimeFormat(getLocale(), { dateStyle: "medium", timeStyle: "medium" }).format(time);
+}
 
 function applyTheme(theme) {
   currentTheme = theme === "light" ? "light" : "dark";
@@ -35,11 +57,12 @@ function applyTheme(theme) {
 
 function renderThemeToggle() {
   const next = currentTheme === "light" ? "dark" : "light";
+  const label = t(next === "light" ? "Switch to light theme" : "Switch to dark theme");
   return el("button", {
     class: "theme-toggle",
     type: "button",
-    title: `Switch to ${next} theme`,
-    "aria-label": `Switch to ${next} theme`,
+    title: label,
+    "aria-label": label,
     "aria-pressed": currentTheme === "light" ? "true" : "false",
     onclick: () => {
       applyTheme(next);
@@ -57,9 +80,9 @@ applyTheme(currentTheme);
 function renderSlate(s) {
   const board = s.storyboard;
   const chips = [
-    el("span", { class: "chip" }, `${s.pipeline.pipeline_type} pipeline`),
+    el("span", { class: "chip" }, t("{pipeline} pipeline", { pipeline: s.pipeline.pipeline_type })),
     board && board.total_duration_seconds
-      ? el("span", { class: "chip" }, `${board.scenes.length} scenes · ${fmtDuration(board.total_duration_seconds)}`)
+      ? el("span", { class: "chip" }, t("{count} scenes · {duration}", { count: board.scenes.length, duration: fmtDuration(board.total_duration_seconds) }))
       : null,
     s.style_playbook ? el("span", { class: "chip" }, s.style_playbook) : null,
   ];
@@ -69,15 +92,15 @@ function renderSlate(s) {
   const stalled = s.stages.find((x) => x.stalled);
   let liveEl;
   if (awaiting) {
-    liveEl = el("span", { class: "live" }, el("span", { class: "dot" }), "◈ AWAITING YOU");
+    liveEl = el("span", { class: "live" }, el("span", { class: "dot" }), t("◈ AWAITING YOU"));
   } else if (stalled) {
     liveEl = el("span", { class: "live", style: "color:var(--red)" },
-      el("span", { class: "dot", style: "background:var(--red);animation:none" }), "⚠ STALLED?");
+      el("span", { class: "dot", style: "background:var(--red);animation:none" }), t("⚠ STALLED?"));
   } else if (s.live || inProgress) {
-    liveEl = el("span", { class: "live" }, el("span", { class: "dot" }), "LIVE");
+    liveEl = el("span", { class: "live" }, el("span", { class: "dot" }), t("LIVE"));
   } else {
     liveEl = el("span", { class: "live idle" }, el("span", { class: "dot" }),
-      `IDLE${s.last_activity ? " · " + fmtAgo(s.last_activity).toUpperCase() : ""}`);
+      `${t("IDLE")}${s.last_activity ? " · " + fmtAgo(s.last_activity).toUpperCase() : ""}`);
   }
 
   const cost = el("div", { class: "cost" });
@@ -94,24 +117,25 @@ function renderSlate(s) {
     const budget = spent + (snapshot.total_reserved_usd ?? 0) + (snapshot.budget_remaining_usd ?? 0);
     const hasBudget = snapshot.budget_remaining_usd != null;
     const pct = hasBudget && budget > 0 ? Math.min(100, (spent / budget) * 100) : 0;
-    cost.append(el("div", { class: "nums" }, el("b", {}, unquoted ? "Unquoted" : fmtMoney(spent)),
+    cost.append(el("div", { class: "nums" }, el("b", {}, unquoted ? t("Unquoted") : fmtMoney(spent)),
       hasBudget ? el("span", {}, ` / ${fmtMoney(budget)}`) : ""));
     if (hasBudget) {
       cost.append(el("div", { class: "bar" }, el("i", {
         class: pct > 90 ? "crit" : pct > 75 ? "warn" : "", style: `width:${pct}%`,
       })));
     }
-    cost.append(el("div", { class: "label" }, unquoted ? "unquoted generation cost" : "generation spend"));
+    cost.append(el("div", { class: "label" }, t(unquoted ? "unquoted generation cost" : "generation spend")));
   }
 
   return el("header", { class: "slate" },
     el("div", { class: "clapper" }),
     el("div", {},
-      el("a", { class: "wordmark", href: "/", style: "text-decoration:none" }, "Backlot"),
+      el("a", { class: "wordmark", href: localePath("/"), style: "text-decoration:none" }, "Backlot"),
       el("h1", {}, s.title),
     ),
     ...chips,
     el("div", { class: "spacer" }),
+    languageTabs(),
     renderThemeToggle(),
     liveEl,
     cost,
@@ -123,19 +147,19 @@ function renderSlate(s) {
 // ---------------------------------------------------------------------------
 
 function stageSub(st) {
-  if (st.status === "awaiting_human") return studioTask ? "awaiting your approval\nreview in this browser" : "awaiting your approval\nreply in chat to continue";
+  if (st.status === "awaiting_human") return t(studioTask ? "awaiting your approval\nreview in this browser" : "awaiting your approval\nreply in chat to continue");
   if (st.status === "in_progress" && st.stalled) {
-    return `stalled? no activity for ${st.stalled_minutes}m\nask the agent for status`;
+    return t("stalled? no activity for {minutes}m\nask the agent for status", { minutes: st.stalled_minutes });
   }
   if (st.status === "in_progress" && st.partial_progress) {
     const done = st.partial_progress.completed_scene_ids;
-    if (Array.isArray(done)) return `${done.length} scene${done.length === 1 ? "" : "s"} done`;
-    return "in progress";
+    if (Array.isArray(done)) return t(done.length === 1 ? "{count} scene done" : "{count} scenes done", { count: done.length });
+    return t("in progress");
   }
-  if (st.status === "in_progress") return "in progress";
-  if (st.status === "failed") return st.error ? String(st.error).slice(0, 60) : "failed";
+  if (st.status === "in_progress") return t("in progress");
+  if (st.status === "failed") return st.error ? String(st.error).slice(0, 60) : t("failed");
   if (st.timestamp) {
-    const approved = st.gated && st.human_approved ? " · approved" : "";
+    const approved = st.gated && st.human_approved ? t(" · approved") : "";
     return fmtClock(st.timestamp) + approved;
   }
   return "";
@@ -153,14 +177,14 @@ function renderRail(s) {
     if (!STAGE_ICONS[st.status]) pendingIndex += 1;
     const node = el("div", {
       class: `stage ${cls}${selectedStage === st.name ? " selected" : ""}${st.undeclared ? " undeclared" : ""}`,
-      title: st.undeclared ? `"${st.name}" ran but isn't declared by this pipeline's manifest` : null,
+      title: st.undeclared ? t('"{stage}" ran but isn\'t declared by this pipeline\'s manifest', { stage: stageLabel(st.name) }) : null,
       onclick: () => toggleDrawer(st.name),
     },
       el("span", { class: "line" }),
       el("span", { class: "node" }, icon),
-      el("span", { class: "name" }, st.name),
+      el("span", { class: "name" }, stageLabel(st.name)),
       el("span", { class: "sub", style: "white-space:pre-line" },
-        st.undeclared ? `${stageSub(st)}\nunlisted`.trim() : stageSub(st)),
+        st.undeclared ? `${stageSub(st)}\n${t("unlisted")}`.trim() : stageSub(st)),
     );
     rail.append(node);
   }
@@ -207,9 +231,9 @@ function reviewSummaryText(review) {
   const counts = reviewMetrics(review);
   return [
     review.decision,
-    `${counts.critical} critical`,
-    `${counts.suggestions} suggestion${counts.suggestions === 1 ? "" : "s"}`,
-    nested.review_focus_met ? `review focus ${nested.review_focus_met}` : null,
+    t("{count} critical", { count: counts.critical }),
+    t(counts.suggestions === 1 ? "{count} suggestion" : "{count} suggestions", { count: counts.suggestions }),
+    nested.review_focus_met ? t("review focus {focus}", { focus: nested.review_focus_met }) : null,
     nested.schema_validation,
   ].filter(Boolean).join(" · ");
 }
@@ -225,9 +249,9 @@ function renderDrawer(s) {
     const metrics = reviewMetrics(st.review);
     const summary = reviewSummaryText(st.review);
     body.append(el("div", { class: "findings", style: "margin-bottom:12px" },
-      el("span", { class: `f ${metrics.critical ? "crit" : ""}` }, `${metrics.critical} critical`),
-      el("span", { class: `f ${metrics.suggestions ? "sugg" : ""}` }, `${metrics.suggestions} suggestions`),
-      el("span", { class: "f" }, `${metrics.nitpicks} nitpicks`),
+      el("span", { class: `f ${metrics.critical ? "crit" : ""}` }, t("{count} critical", { count: metrics.critical })),
+      el("span", { class: `f ${metrics.suggestions ? "sugg" : ""}` }, t("{count} suggestions", { count: metrics.suggestions })),
+      el("span", { class: "f" }, t("{count} nitpicks", { count: metrics.nitpicks })),
       summary ? el("span", { style: "font-size:calc(11.5px * var(--fs-scale));color:var(--text-2);margin-left:8px" }, summary) : null,
     ));
   }
@@ -239,22 +263,22 @@ function renderDrawer(s) {
     if (!artifact) continue;
     shown = true;
     body.append(
-      el("div", { class: "d-cat", style: "font-family:var(--mono);font-size:calc(9.5px * var(--fs-scale));color:var(--text-3);letter-spacing:.1em;text-transform:uppercase;margin:6px 0 4px" }, name),
+      el("div", { class: "d-cat", style: "font-family:var(--mono);font-size:calc(9.5px * var(--fs-scale));color:var(--text-3);letter-spacing:.1em;text-transform:uppercase;margin:6px 0 4px" }, humanize(name)),
       el("pre", {}, JSON.stringify(artifact, null, 2)),
     );
   }
   if (!shown) {
     body.append(el("div", { class: "hint" },
-      st.status === "pending" ? "This stage hasn't run yet." : "No canonical artifact found on disk for this stage."));
+      t(st.status === "pending" ? "This stage hasn't run yet." : "No canonical artifact found on disk for this stage.")));
   }
 
   return el("div", { class: "drawer" },
     el("div", { class: "drawer-head" },
-      el("h3", {}, `${st.name} — ${st.status}`),
-      st.gate_skipped ? el("span", { class: "gate-chip" }, "⚑ GATE SKIPPED") : null,
+      el("h3", {}, `${stageLabel(st.name)} — ${t(stateLabel(st.status))}`),
+      st.gate_skipped ? el("span", { class: "gate-chip" }, t("⚑ GATE SKIPPED")) : null,
       st.versions > 1 ? el("span", { class: "ver-chip" }, `v${st.versions}`) : null,
-      st.timestamp ? el("span", { class: "meta", style: "font-family:var(--mono);font-size:calc(10.5px * var(--fs-scale));color:var(--text-3)" }, st.timestamp) : null,
-      el("span", { class: "close", onclick: () => toggleDrawer(st.name) }, "CLOSE ✕"),
+      st.timestamp ? el("span", { class: "meta", style: "font-family:var(--mono);font-size:calc(10.5px * var(--fs-scale));color:var(--text-3)" }, fmtDateTime(st.timestamp)) : null,
+      el("span", { class: "close", onclick: () => toggleDrawer(st.name) }, t("CLOSE ✕")),
     ),
     body,
   );
@@ -270,7 +294,7 @@ function scriptSections(script, limit) {
   const nodes = [];
   for (const sec of shown) {
     nodes.push(el("div", { class: "sp-slug" },
-      `${(sec.id || "").toUpperCase()} — ${sec.label || "Section"} `,
+      `${(sec.id || "").toUpperCase()} — ${sec.label || t("Section")} `,
       el("span", { class: "tc" }, `${fmtDuration(sec.start_seconds)} – ${fmtDuration(sec.end_seconds)}`)));
     if (sec.text) nodes.push(el("div", { class: "sp-action" }, sec.text));
     if (sec.speaker_directions) nodes.push(el("div", { class: "sp-paren" }, `(${sec.speaker_directions})`));
@@ -281,7 +305,7 @@ function scriptSections(script, limit) {
     }
   }
   if (limit && sections.length > limit) {
-    nodes.push(el("div", { class: "sp-fade" }, `… ${sections.length - limit} more sections`));
+    nodes.push(el("div", { class: "sp-fade" }, t("… {count} more sections", { count: sections.length - limit })));
   }
   return nodes;
 }
@@ -292,26 +316,26 @@ function renderScriptCard(s) {
   const scriptStage = s.stages.find((x) => x.name === "script");
   const status = scriptStage ? scriptStage.status : "unknown";
   const stamp = status === "completed"
-    ? el("span", { class: "script-status script-approved" }, "APPROVED")
+    ? el("span", { class: "script-status script-approved" }, t("APPROVED"))
     : status === "awaiting_human"
-      ? el("span", { class: "script-status script-pending" }, "PENDING APPROVAL")
+      ? el("span", { class: "script-status script-pending" }, t("PENDING APPROVAL"))
       : status === "in_progress"
-        ? el("span", { class: "script-status script-draft" }, "DRAFTING")
+        ? el("span", { class: "script-status script-draft" }, t("DRAFTING"))
         : null;
 
-  const card = el("div", { class: "script-card script-preview", title: "Click to expand full script", onclick: openScriptModal },
+  const card = el("div", { class: "script-card script-preview", title: t("Click to expand full script"), onclick: openScriptModal },
     stamp,
     el("div", { class: "sp-title" }, script.title || s.title),
     el("div", { class: "sp-meta" },
-      `script · ${fmtDuration(script.total_duration_seconds)} · ${(script.sections || []).length} sections`),
+      t("script · {duration} · {count} sections", { duration: fmtDuration(script.total_duration_seconds), count: (script.sections || []).length })),
     ...scriptSections(script, 4),
-    el("span", { class: "sp-expand" }, "⤢ EXPAND SCRIPT"),
+    el("span", { class: "sp-expand" }, t("⤢ EXPAND SCRIPT")),
   );
   return card;
 }
 
 function humanize(value) {
-  return String(value || "artifact").replaceAll("_", " ");
+  return t(String(value || "artifact").replaceAll("_", " "));
 }
 
 function shortText(value, limit = 180) {
@@ -322,7 +346,7 @@ function shortText(value, limit = 180) {
 function reviewFact(label, value) {
   if (value == null || value === "") return null;
   return el("div", { class: "approval-fact" },
-    el("span", {}, label),
+    el("span", {}, t(label)),
     el("b", {}, value),
   );
 }
@@ -339,11 +363,11 @@ function titledItems(items, selectedId = null) {
       return el("li", {}, shortText(item));
     }
     const id = item.id || item.concept_id || item.option_id;
-    const title = item.title || item.name || item.display_name || item.label || id || item.path || item.platform || item.description || `Item ${index + 1}`;
+    const title = item.title || item.name || item.display_name || item.label || id || item.path || item.platform || item.description || t("Item {number}", { number: index + 1 });
     const detail = item.hook || item.why_this_works || item.summary || item.description || item.silhouette_notes;
     return el("li", { class: id && id === selectedId ? "selected" : "" },
       el("div", { class: "approval-item-title" }, shortText(title, 100),
-        id && id === selectedId ? el("span", { class: "approval-selected" }, "SELECTED") : null),
+        id && id === selectedId ? el("span", { class: "approval-selected" }, t("SELECTED")) : null),
       detail && detail !== title ? el("p", {}, shortText(detail)) : null,
     );
   }).filter(Boolean);
@@ -358,7 +382,7 @@ function genericArtifactSummary(artifact) {
     if (["string", "number", "boolean"].includes(typeof value)) {
       facts.push(reviewFact(humanize(key), shortText(value, 90)));
     } else if (Array.isArray(value)) {
-      facts.push(reviewFact(humanize(key), `${value.length} item${value.length === 1 ? "" : "s"}`));
+      facts.push(reviewFact(humanize(key), t(value.length === 1 ? "{count} item" : "{count} items", { count: value.length })));
       if (!items.length && value.length) items.push(titledItems(value));
     }
     if (facts.length >= 6) break;
@@ -393,7 +417,7 @@ function artifactReviewContent(name, artifact) {
       titledItems(artifact.concept_options, selected),
       (artifact.selected_concept || {}).rationale
         ? el("p", { class: "approval-rationale" },
-          el("b", {}, "WHY THIS CONCEPT  "), shortText(artifact.selected_concept.rationale))
+          el("b", {}, t("WHY THIS CONCEPT  ")), shortText(artifact.selected_concept.rationale))
         : null,
     ].filter(Boolean);
   }
@@ -416,7 +440,7 @@ function artifactReviewContent(name, artifact) {
         reviewFact("sections", (artifact.sections || []).length),
       ]),
       first && first.text ? el("p", { class: "approval-lead" }, shortText(first.text, 220)) : null,
-      el("p", { class: "approval-guidance" }, "The complete script preview is shown directly below."),
+      el("p", { class: "approval-guidance" }, t("The complete script preview is shown directly below.")),
     ].filter(Boolean);
   }
   if (name === "scene_plan") {
@@ -428,7 +452,7 @@ function artifactReviewContent(name, artifact) {
         reviewFact("duration", end ? fmtDuration(end) : null),
       ]),
       titledItems(scenes),
-      el("p", { class: "approval-guidance" }, "Review timing and shot coverage in the storyboard below."),
+      el("p", { class: "approval-guidance" }, t("Review timing and shot coverage in the storyboard below.")),
     ].filter(Boolean);
   }
   if (name === "asset_manifest") {
@@ -441,7 +465,7 @@ function artifactReviewContent(name, artifact) {
         reviewFact("generation cost", artifact.total_cost_usd != null ? fmtMoney(artifact.total_cost_usd) : null),
       ]),
       titledItems(assets),
-      el("p", { class: "approval-guidance" }, "Inspect every generated take in the filmstrip below before approving compose."),
+      el("p", { class: "approval-guidance" }, t("Inspect every generated take in the filmstrip below before approving compose.")),
     ].filter(Boolean);
   }
   if (name === "edit_decisions") {
@@ -466,7 +490,7 @@ function artifactReviewContent(name, artifact) {
     return [
       reviewFacts([reviewFact("destinations", Array.isArray(artifact.entries) ? artifact.entries.length : null)]),
       titledItems((artifact.entries || []).map((entry) => ({
-        title: entry.platform || entry.destination || "Publish destination",
+        title: entry.platform || entry.destination || t("Publish destination"),
         description: [entry.status, entry.url].filter(Boolean).join(" · "),
       }))),
     ].filter(Boolean);
@@ -478,14 +502,14 @@ function artifactReviewTitle(name, artifact, s) {
   if (name === "proposal_packet") {
     const selected = (artifact.selected_concept || {}).concept_id;
     const concept = (artifact.concept_options || []).find((item) => item.id === selected);
-    return (concept && concept.title) || "Production proposal";
+    return (concept && concept.title) || t("Production proposal");
   }
-  if (name === "research_brief") return artifact.topic || "Research brief";
-  if (name === "scene_plan") return "Scene plan";
-  if (name === "asset_manifest") return "Generated assets";
-  if (name === "edit_decisions") return "Edit decisions";
-  if (name === "render_report") return "Render report";
-  if (name === "publish_log") return "Publish plan";
+  if (name === "research_brief") return artifact.topic || t("Research brief");
+  if (name === "scene_plan") return t("Scene plan");
+  if (name === "asset_manifest") return t("Generated assets");
+  if (name === "edit_decisions") return t("Edit decisions");
+  if (name === "render_report") return t("Render report");
+  if (name === "publish_log") return t("Publish plan");
   return artifact.title || artifact.name || s.title;
 }
 
@@ -514,30 +538,30 @@ function renderApprovalReview(s) {
 
   if (!artifacts.length) {
     artifacts.push(el("div", { class: "approval-missing", role: "alert" },
-      el("b", {}, "Nothing reviewable was found. "),
+      el("b", {}, t("Nothing reviewable was found. ")),
       names.length
-        ? `The ${awaiting.name} checkpoint declares ${names.map(humanize).join(", ")}, but Backlot could not load it.`
-        : `The ${awaiting.name} checkpoint does not declare an artifact.`,
+        ? t("The {stage} checkpoint declares {artifacts}, but Backlot could not load it.", { stage: stageLabel(awaiting.name), artifacts: names.map(humanize).join(", ") })
+        : t("The {stage} checkpoint does not declare an artifact.", { stage: stageLabel(awaiting.name) }),
     ));
   }
 
   return el("section", { class: "approval-review", "data-stage": awaiting.name },
     el("div", { class: "approval-review-head" },
       el("div", {},
-        el("div", { class: "approval-eyebrow" }, "REVIEW GATE"),
-        el("h2", {}, `${humanize(awaiting.name)} is ready for your review`),
-        el("p", {}, studioTask ? "Review the artifact here, then use the browser controls below to approve this version or request changes." : "Review the artifact here, then reply in chat to approve it or request changes."),
+        el("div", { class: "approval-eyebrow" }, t("REVIEW GATE")),
+        el("h2", {}, t("{stage} is ready for your review", { stage: stageLabel(awaiting.name) })),
+        el("p", {}, t(studioTask ? "Review the artifact here, then use the browser controls below to approve this version or request changes." : "Review the artifact here, then reply in chat to approve it or request changes.")),
       ),
-      el("span", { class: "approval-status" }, "PENDING APPROVAL"),
+      el("span", { class: "approval-status" }, t("PENDING APPROVAL")),
     ),
     reviewSummary ? el("div", { class: "approval-review-note" },
-      el("b", {}, "SELF-REVIEW  "), shortText(reviewSummary, 260)) : null,
+      el("b", {}, t("SELF-REVIEW  ")), shortText(reviewSummary, 260)) : null,
     el("div", { class: "approval-artifacts" }, artifacts),
     el("div", { class: "approval-review-foot" },
       el("span", {}, nextStage
-        ? `Approval unlocks ${humanize(nextStage.name)}.`
-        : "This is the final approval gate."),
-      el("button", { type: "button", onclick: () => toggleDrawer(awaiting.name) }, "OPEN FULL ARTIFACT"),
+        ? t("Approval unlocks {stage}.", { stage: stageLabel(nextStage.name) })
+        : t("This is the final approval gate.")),
+      el("button", { type: "button", onclick: () => toggleDrawer(awaiting.name) }, t("OPEN FULL ARTIFACT")),
     ),
   );
 }
@@ -545,39 +569,41 @@ function renderApprovalReview(s) {
 function openScriptModal() {
   const script = state && state.artifacts.script;
   if (!script) return;
+  refreshModal = openScriptModal;
   modal.innerHTML = "";
   modal.append(
-    el("span", { class: "modal-close", onclick: closeModal }, "ESC · CLOSE"),
+    el("span", { class: "modal-close", onclick: closeModal }, t("ESC · CLOSE")),
     el("div", { class: "modal-page" },
       el("div", { class: "script-card", style: "cursor:default" },
         el("div", { class: "sp-title" }, script.title || state.title),
         el("div", { class: "sp-meta" },
-          `script · ${fmtDuration(script.total_duration_seconds)} · ${(script.sections || []).length} sections`),
+          t("script · {duration} · {count} sections", { duration: fmtDuration(script.total_duration_seconds), count: (script.sections || []).length })),
         ...scriptSections(script, 0),
-        el("div", { class: "sp-fade" }, "END"),
+        el("div", { class: "sp-fade" }, t("END")),
       )),
   );
   modal.classList.add("open");
 }
 
 function openNarrModal(card) {
+  refreshModal = () => openNarrModal(card);
   modal.innerHTML = "";
   const meta = [sceneLabel(card.id), card.section_label, fmtDuration(card.duration_seconds)]
     .filter(Boolean).join(" · ");
   modal.append(
-    el("span", { class: "modal-close", onclick: closeModal }, "ESC · CLOSE"),
+    el("span", { class: "modal-close", onclick: closeModal }, t("ESC · CLOSE")),
     el("div", { class: "modal-page" },
       el("div", { class: "script-card", style: "cursor:default" },
         el("div", { class: "sp-meta" }, meta),
         card.narration ? el("div", { class: "sp-action", style: "margin-left:0" }, card.narration) : null,
-        card.shot_intent ? el("div", { class: "sp-paren", style: "margin-left:0" }, `Intent — ${card.shot_intent}`) : null,
+        card.shot_intent ? el("div", { class: "sp-paren", style: "margin-left:0" }, t("Intent — {intent}", { intent: card.shot_intent })) : null,
         card.description ? el("div", { class: "sp-paren", style: "margin-left:0" }, card.description) : null,
       )),
   );
   modal.classList.add("open");
 }
 
-function closeModal() { modal.classList.remove("open"); }
+function closeModal() { modal.classList.remove("open"); refreshModal = null; }
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
 modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
 
@@ -609,16 +635,16 @@ function renderDecisions(s) {
     const alts = (d.options_considered || [])
       .filter((o) => (o.option_id ?? o.label) !== d.selected && (o.option_id || o.label));
     body.append(el("div", { class: "decision" },
-      el("div", { class: "d-cat" }, `${d.category || "decision"}${d.confidence ? ` · ${d.confidence}` : ""}`,
-        revised ? el("span", { class: "d-revised" }, " · revised") : null),
+      el("div", { class: "d-cat" }, `${d.category || t("decision")}${d.confidence ? ` · ${d.confidence}` : ""}`,
+        revised ? el("span", { class: "d-revised" }, t(" · revised")) : null),
       el("div", { class: "d-pick" }, `${d.subject || ""} `, el("span", { class: "arrow" }, "→"), ` ${selLabel}`),
       d.reason ? el("div", { class: "d-why" }, d.reason) : null,
-      alts.length ? el("div", { class: "d-alt" }, "also considered: ",
+      alts.length ? el("div", { class: "d-alt" }, t("also considered: "),
         alts.slice(0, 3).map((o, i) => [i ? " · " : "", el("s", {}, o.label || o.option_id)]).flat()) : null,
     ));
   }
   return el("div", { class: "panel" },
-    el("div", { class: "panel-head" }, el("h2", {}, "Decisions"), el("span", { class: "meta" }, "decision_log.json")),
+    el("div", { class: "panel-head" }, el("h2", {}, t("Decisions")), el("span", { class: "meta" }, "decision_log.json")),
     body);
 }
 
@@ -654,11 +680,11 @@ function renderActivity(s) {
     let statusEl;
     if (ev.event === "finish") {
       statusEl = el("span", { class: `status ${ev.success === false ? "err" : "ok"}` },
-        `${ev.success === false ? "✕" : "✓"}${ev.duration_s != null ? ` ${ev.duration_s.toFixed ? ev.duration_s.toFixed(1) : ev.duration_s}s` : ""}${ev.cost_usd ? ` ${fmtMoney(ev.cost_usd)}` : ""}`);
+        `${ev.success === false ? "✕" : "✓"}${ev.duration_s != null ? " " + t("{seconds}s", { seconds: new Intl.NumberFormat(getLocale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(ev.duration_s) }) : ""}${ev.cost_usd ? ` ${fmtMoney(ev.cost_usd)}` : ""}`);
     } else if (ev.event === "error") {
       statusEl = el("span", { class: "status err" }, "✕");
     } else {
-      statusEl = el("span", { class: "status run" }, "● running");
+      statusEl = el("span", { class: "status run" }, t("● running"));
     }
     body.append(el("div", { class: "act-row" },
       el("span", { class: "t" }, fmtClock(ev.ts)),
@@ -668,7 +694,7 @@ function renderActivity(s) {
     ));
   }
   return el("div", { class: "panel" },
-    el("div", { class: "panel-head" }, el("h2", {}, "Activity"), el("span", { class: "meta" }, "events.jsonl")),
+    el("div", { class: "panel-head" }, el("h2", {}, t("Activity")), el("span", { class: "meta" }, "events.jsonl")),
     body);
 }
 
@@ -679,7 +705,7 @@ function renderActivity(s) {
 function sceneLabel(id) {
   // "sc4" → "SC 04", "scene-11" → "SC 11", anything else → uppercased id
   const m = String(id).match(/(\d+)\s*$/);
-  if (m) return `SC ${m[1].padStart(2, "0")}`;
+  if (m) return t("SC {number}", { number: m[1].padStart(2, "0") });
   return String(id).toUpperCase().slice(0, 10);
 }
 
@@ -690,8 +716,8 @@ function sceneCard(s, card) {
 
   const slate = el("div", { class: "sc-slate" },
     el("span", { class: "num" }, sceneLabel(card.id)),
-    card.takes.length > 1 ? el("span", { class: "take" }, `T${card.takes.length}`) : null,
-    card.hero_moment ? el("span", { class: "hero" }, "★ HERO") : null,
+    card.takes.length > 1 ? el("span", { class: "take" }, t("T{count}", { count: card.takes.length })) : null,
+    card.hero_moment ? el("span", { class: "hero" }, t("★ HERO")) : null,
     el("span", { class: "dur" }, fmtDuration(dur)),
   );
   wrap.append(slate);
@@ -702,12 +728,12 @@ function sceneCard(s, card) {
     thumb = el("div", { class: "thumb generating" },
       el("div", { class: "shimmer" }),
       el("div", { class: "gen-label" },
-        el("span", {}, "◉ GENERATING"),
+        el("span", {}, t("◉ GENERATING")),
         el("span", { class: "sub" }, card.generating_tool || "")));
   } else if (card.visual && card.visual.exists) {
     const v = card.visual;
     const badge = [v.model || v.source_tool, v.cost_usd != null ? fmtMoney(v.cost_usd) : null,
-      v.quality_score != null ? `q ${v.quality_score}` : null].filter(Boolean).join(" · ");
+      v.quality_score != null ? t("q {score}", { score: v.quality_score }) : null].filter(Boolean).join(" · ");
     if (v.type === "video") {
       thumb = el("div", { class: "thumb approved" },
         el("video", { src: mediaURL(s.project_id, v.path), muted: "", preload: "metadata", playsinline: "" }),
@@ -722,30 +748,30 @@ function sceneCard(s, card) {
       // A thumbnail that fails to load must never show a broken-image icon —
       // fall back to the shot spec in place (F: broken links).
       img.onerror = () => {
-        const t = img.closest(".thumb");
-        if (!t) return;
-        t.className = "thumb spec";
-        t.innerHTML = "";
-        t.append(el("div", { class: "spec-in" },
-          el("div", { class: "spec-desc" }, card.description || "asset unavailable"),
+        const thumbNode = img.closest(".thumb");
+        if (!thumbNode) return;
+        thumbNode.className = "thumb spec";
+        thumbNode.innerHTML = "";
+        thumbNode.append(el("div", { class: "spec-in" },
+          el("div", { class: "spec-desc" }, card.description || t("asset unavailable")),
           el("div", { class: "spec-shot" }, [card.framing, card.movement].filter(Boolean).join(" · ").slice(0, 70))));
       };
       thumb = el("div", { class: "thumb approved" }, img,
-        v.snapshot ? el("span", { class: "badge" }, "snapshot") : (badge ? el("span", { class: "badge" }, badge) : null));
+        v.snapshot ? el("span", { class: "badge" }, t("snapshot")) : (badge ? el("span", { class: "badge" }, badge) : null));
     }
   } else if (card.type === "animation") {
     // Bespoke/atelier scene with no snapshot yet — name it as such rather
     // than "no asset yet" (the composition IS the asset).
     thumb = el("div", { class: "thumb spec bespoke" },
       el("div", { class: "spec-in" },
-        el("span", { class: "bespoke-tag" }, "◆ BESPOKE"),
+        el("span", { class: "bespoke-tag" }, t("◆ BESPOKE")),
         el("div", { class: "spec-desc" }, card.description || ""),
-        el("div", { class: "spec-shot" }, "hand-authored composition")));
+        el("div", { class: "spec-shot" }, t("hand-authored composition"))));
   } else if (card.visual && !card.visual.exists) {
     thumb = el("div", { class: "thumb missing" },
       el("div", { class: "spec-in" },
         el("span", { class: "warn-ic" }, "⚑"),
-        el("div", { class: "spec-desc" }, "asset in manifest, file missing"),
+        el("div", { class: "spec-desc" }, t("asset in manifest, file missing")),
         el("div", { class: "spec-shot" }, card.visual.path || "")));
   } else if (card.type === "text_card") {
     thumb = el("div", { class: "thumb textcard" },
@@ -754,7 +780,7 @@ function sceneCard(s, card) {
     thumb = el("div", { class: "thumb missing" },
       el("div", { class: "spec-in" },
         el("span", { class: "warn-ic" }, "⚑"),
-        el("div", { class: "spec-desc" }, "no asset yet"),
+        el("div", { class: "spec-desc" }, t("no asset yet")),
         el("div", { class: "spec-shot" }, (card.required_assets[0].description || "").slice(0, 60))));
   } else {
     thumb = el("div", { class: "thumb spec" },
@@ -776,17 +802,17 @@ function sceneCard(s, card) {
   // takes drawer
   if (card.takes.length > 1) {
     const takes = el("div", { class: "takes" });
-    card.takes.forEach((t, i) => {
+    card.takes.forEach((take, i) => {
       const isActive = card.visual && (
-        t === card.visual
-        || (t.path && t.path === card.visual.path)
-        || (t.id && t.id === card.visual.id)
+        take === card.visual
+        || (take.path && take.path === card.visual.path)
+        || (take.id && take.id === card.visual.id)
       );
-      const tk = el("span", { class: `tk${isActive ? " active" : ""}`, title: `take ${i + 1}` });
-      if (t.exists && t.type === "image") tk.append(el("img", { src: thumbURL(s.project_id, t.path, 320), loading: "lazy", alt: "" }));
+      const tk = el("span", { class: `tk${isActive ? " active" : ""}`, title: t("take {number}", { number: i + 1 }) });
+      if (take.exists && take.type === "image") tk.append(el("img", { src: thumbURL(s.project_id, take.path, 320), loading: "lazy", alt: "" }));
       takes.append(tk);
     });
-    takes.append(el("span", { class: "tk-label" }, `${card.takes.length} TAKES`));
+    takes.append(el("span", { class: "tk-label" }, t("{count} TAKES", { count: card.takes.length })));
     wrap.append(takes);
   }
 
@@ -795,7 +821,7 @@ function sceneCard(s, card) {
     const long = card.narration.length > 90;
     wrap.append(el("div", {
       class: `narr${long ? " clip" : ""}`,
-      title: "Click to read the full narration",
+      title: t("Click to read the full narration"),
       onclick: () => openNarrModal(card),
     }, card.narration, long ? el("span", { class: "narr-more" }, "⤢") : null));
   } else if (card.shot_intent || card.description) {
@@ -803,7 +829,7 @@ function sceneCard(s, card) {
   }
   const narrAudio = card.audio.find((a) => a.exists && (a.type === "narration" || a.type === "audio"));
   if (narrAudio) {
-    const wave = el("div", { class: "wave", style: "cursor:pointer", title: "Play narration" });
+    const wave = el("div", { class: "wave", style: "cursor:pointer", title: t("Play narration") });
     waveBars(wave, card.id + narrAudio.path);
     wave.append(el("span", { class: "wv-time" }, narrAudio.duration_seconds ? fmtDuration(narrAudio.duration_seconds) : "♪"));
     wave.onclick = () => {
@@ -821,9 +847,9 @@ function renderStoryboard(s) {
   const strip = el("div", { class: "filmstrip" });
   for (const card of board.scenes) strip.append(sceneCard(s, card));
   return el("div", {},
-    el("div", { class: "section-title" }, "Storyboard",
+    el("div", { class: "section-title" }, t("Storyboard"),
       el("span", { class: "meta" },
-        `${board.scenes.length} scenes${board.total_duration_seconds ? ` · ${fmtDuration(board.total_duration_seconds)}` : ""} · card width ∝ duration`)),
+        t("{count} scenes{duration} · card width ∝ duration", { count: board.scenes.length, duration: board.total_duration_seconds ? ` · ${fmtDuration(board.total_duration_seconds)}` : "" }))),
     el("div", { class: "strip-outer" }, strip));
 }
 
@@ -858,12 +884,12 @@ function renderRenders(s) {
     renders.map((r, i) => el("span", {
       class: `v${i === activeRender ? " active" : ""}`,
       onclick: () => { activeRender = i; render(); },
-    }, `${r.path.split("/").pop()}${r.at_root ? " · root" : ""}`)),
+    }, `${r.path.split("/").pop()}${r.at_root ? t(" · root") : ""}`)),
     el("span", { style: "margin-left:auto" }, `${(current.size / 1048576).toFixed(1)} MB`),
   );
   return el("div", {},
-    el("div", { class: "section-title" }, "Renders",
-      el("span", { class: "meta" }, `${renders.length} version${renders.length === 1 ? "" : "s"}`)),
+    el("div", { class: "section-title" }, t("Renders"),
+      el("span", { class: "meta" }, t(renders.length === 1 ? "{count} version" : "{count} versions", { count: renders.length }))),
     el("div", { class: "render-hero" }, video),
     versions);
 }
@@ -877,8 +903,8 @@ function renderFoundMedia(s) {
       el("img", { src: thumbURL(s.project_id, snap.path, 640), loading: "lazy", alt: "" })));
   }
   return el("div", {},
-    el("div", { class: "section-title" }, "What the watcher found",
-      el("span", { class: "meta" }, "snapshots / verification frames")),
+    el("div", { class: "section-title" }, t("What the watcher found"),
+      el("span", { class: "meta" }, t("snapshots / verification frames"))),
     grid);
 }
 
@@ -887,9 +913,9 @@ function renderNoState(s) {
   return el("div", { class: "notice", style: "border-color:#2b2b33;background:var(--surface-2);color:var(--text-3)" },
     el("span", { style: "font-size:calc(15px * var(--fs-scale))" }, "◌"),
     el("span", {},
-      el("b", { style: "color:var(--text-2)" }, "No pipeline state. "),
-      "This project has no checkpoints — Backlot is showing what it found on disk. ",
-      "Runs that follow the checkpoint protocol get the full board."));
+      el("b", { style: "color:var(--text-2)" }, t("No pipeline state. ")),
+      t("This project has no checkpoints — Backlot is showing what it found on disk. "),
+      t("Runs that follow the checkpoint protocol get the full board.")));
 }
 
 function renderAwaitingNotice(s) {
@@ -898,8 +924,8 @@ function renderAwaitingNotice(s) {
   return el("div", { class: "notice" },
     el("span", { style: "font-size:calc(16px * var(--fs-scale))" }, "◈"),
     el("span", {},
-      el("b", {}, `The ${awaiting.name} stage is waiting for your review. `),
-      studioTask ? "Use the browser controls below to approve this exact version or request changes." : "The agent is paused at this gate — reply in chat to approve or request changes."));
+      el("b", {}, t("The {stage} stage is waiting for your review. ", { stage: stageLabel(awaiting.name) })),
+      t(studioTask ? "Use the browser controls below to approve this exact version or request changes." : "The agent is paused at this gate — reply in chat to approve or request changes.")));
 }
 
 // ---------------------------------------------------------------------------
@@ -994,21 +1020,22 @@ function renderReplayBar(s) {
   if (!replay) {
     // collapsed: just the entry button
     return el("div", { class: "replay-bar", style: "justify-content:flex-end" },
-      el("span", { class: "rp-time" }, "scrub the whole run"),
-      el("span", { class: "rp-btn", onclick: startReplay }, "▶ REPLAY RUN"));
+      el("span", { class: "rp-time" }, t("scrub the whole run")),
+      el("span", { class: "rp-btn", onclick: startReplay }, t("▶ REPLAY RUN")));
   }
   const pos = (replay.t - replay.t0) / Math.max(1, replay.t1 - replay.t0);
   const timeLabel = el("span", { class: "rp-time" },
-    new Date(replay.t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+    new Date(replay.t).toLocaleTimeString(getLocale(), { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
   const setT = (value) => {
     replay.t = replay.t0 + (Number(value) / 1000) * (replay.t1 - replay.t0);
     timeLabel.textContent = new Date(replay.t)
-      .toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      .toLocaleTimeString(getLocale(), { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   };
   return el("div", { class: "replay-bar" },
-    el("span", { class: "rp-btn", onclick: toggleReplayPlay }, replay.playing ? "❚❚" : "▶"),
+    el("span", { class: "rp-btn", onclick: toggleReplayPlay, "aria-label": t(replay.playing ? "Pause replay" : "Play replay") }, replay.playing ? "❚❚" : "▶"),
     el("input", {
       type: "range", min: "0", max: "1000", value: String(Math.round(pos * 1000)),
+      "aria-label": t("Replay position"),
       // A full render() would destroy this slider mid-drag: while dragging,
       // only pause + track the time label; re-render the board on release.
       onpointerdown: () => { replay.playing = false; },
@@ -1016,7 +1043,7 @@ function renderReplayBar(s) {
       onchange: (e) => { setT(e.target.value); render(); },
     }),
     timeLabel,
-    el("span", { class: "rp-btn", onclick: stopReplay }, "✕ LIVE"),
+    el("span", { class: "rp-btn", onclick: stopReplay }, t("✕ LIVE")),
   );
 }
 
@@ -1067,26 +1094,42 @@ function tickReplay() {
 // ---------------------------------------------------------------------------
 
 function render() {
-  if (!state) return;
+  if (!state) {
+    if (loadError) {
+      app.innerHTML = "";
+      document.title = `Backlot — ${t("PROJECT NOT FOUND")}`;
+      app.append(el("header", { class: "slate" },
+        el("a", { class: "wordmark", href: localePath("/") }, "Backlot"),
+        el("div", { class: "spacer" }), languageTabs(), renderThemeToggle()),
+        el("div", { id: "language-panel", role: "tabpanel", tabindex: "0", "aria-labelledby": `language-tab-${getLocale()}` },
+          el("div", { class: "empty", style: "margin-top:80px" },
+            el("div", { class: "big" }, t("PROJECT NOT FOUND")), el("div", {}, String(loadError)))));
+    }
+    return;
+  }
   const s = replay ? stateAt(state, replay.t) : state;
   document.title = `Backlot — ${s.title}`;
   document.body.classList.toggle("first", firstPaint);
   firstPaint = false;
   const focused = document.activeElement;
+  const localeTabIndex = focused?.closest('[role="tablist"]')
+    ? [...focused.closest('[role="tablist"]').querySelectorAll('[role="tab"]')].indexOf(focused) : -1;
   const focusId = focused?.closest("#studio-controls") ? focused.id : null;
   const selection = focusId === "revision-comment" ? [focused.selectionStart, focused.selectionEnd] : null;
   app.innerHTML = "";
   app.append(renderSlate(s));
+  const panel = el("div", { id: "language-panel", role: "tabpanel", tabindex: "0", "aria-labelledby": `language-tab-${getLocale()}` });
+  app.append(panel);
   const controls = renderStudioControls();
-  app.append(renderRail(s));
+  panel.append(renderRail(s));
   const replayBar = renderReplayBar(state);
-  if (replayBar) app.append(replayBar);
+  if (replayBar) panel.append(replayBar);
   const drawer = renderDrawer(s);
-  if (drawer) app.append(drawer);
+  if (drawer) panel.append(drawer);
   const awaitingNotice = renderAwaitingNotice(s);
-  if (awaitingNotice) app.append(awaitingNotice);
+  if (awaitingNotice) panel.append(awaitingNotice);
   const noState = renderNoState(s);
-  if (noState) app.append(noState);
+  if (noState) panel.append(noState);
 
   const main = el("div", { class: "main-col" });
   const approvalReview = renderApprovalReview(s);
@@ -1111,10 +1154,10 @@ function render() {
     }
     if (controls) main.append(controls);
     const hasAside = Boolean(decisions || activity);
-    app.append(el("div", { class: `board${hasAside ? "" : " solo"}` }, main, hasAside ? aside : null));
+    panel.append(el("div", { class: `board${hasAside ? "" : " solo"}` }, main, hasAside ? aside : null));
   } else {
     for (const section of [storyboard, found, renders]) {
-      if (section) app.append(section);
+      if (section) panel.append(section);
     }
   }
   if (focusId) {
@@ -1122,6 +1165,7 @@ function render() {
     replacement?.focus();
     if (selection && replacement) replacement.setSelectionRange(...selection);
   }
+  if (localeTabIndex >= 0) app.querySelectorAll('[role="tablist"] [role="tab"]')[localeTabIndex]?.focus();
 }
 
 // Defensive normalization (F-02): the server contract guarantees these
@@ -1166,10 +1210,8 @@ async function refresh() {
 }
 
 refresh().catch((err) => {
-  app.innerHTML = "";
-  app.append(el("div", { class: "empty", style: "margin-top:80px" },
-    el("div", { class: "big" }, "PROJECT NOT FOUND"),
-    el("div", {}, String(err))));
+  loadError = err;
+  render();
 });
 // ?static=1 disables the live feed (screenshots, static exports).
 if (!new URLSearchParams(location.search).has("static")) {
@@ -1177,6 +1219,10 @@ if (!new URLSearchParams(location.search).has("static")) {
 }
 
 window.addEventListener("pagehide", () => studioStream?.close());
+window.addEventListener("languagechange", () => {
+  render();
+  if (modal.classList.contains("open")) refreshModal?.();
+});
 
 async function refreshStudio() {
   if (new URLSearchParams(location.search).has("static")) return;
@@ -1231,7 +1277,7 @@ async function sendStudioAction(kind, task, gate, draft) {
   } catch (error) {
     studioMessage = error.status === 409
       ? "This version changed. The current gate has been refreshed; review it before approving again."
-      : error.message;
+      : error.i18nKey || error.message;
   } finally {
     studioBusy = false; await refresh();
   }
@@ -1240,18 +1286,23 @@ async function sendStudioAction(kind, task, gate, draft) {
 function renderStudioControls() {
   if (!studioTask) return null;
   const task = studioTask;
+  const cost = task.cost || {};
+  const costText = t(cost.price_status === "unquoted" || cost.unknown_call_count > 0
+    ? "Unquoted cost · {spent} recorded · {reserved} reserved" : "{spent} recorded · {reserved} reserved", {
+    spent: t(moneyMicros(cost.spent_usd_micros)), reserved: t(moneyMicros(cost.reserved_usd_micros)),
+  });
   const panel = el("section", { class: "studio-controls", id: "studio-controls", "data-task-id": task.task_id,
     "data-task-version": task.version, "aria-busy": String(studioBusy), "aria-labelledby": "studio-control-heading" },
-    el("span", { class: "chip" }, "BROWSER PRODUCTION"),
-    el("h2", { id: "studio-control-heading" }, stateLabel(task.state)),
-    el("p", { class: "studio-meta" }, `${task.task_id} · ${task.config_snapshot.provider} / ${task.config_snapshot.model} · version ${task.version}`),
-    el("p", { class: "studio-meta" }, costLabel(task)),
-    el("a", { href: `/studio?task=${encodeURIComponent(task.task_id)}` }, "View task in Studio"));
-  if (replay) { panel.append(el("p", {}, "You are viewing history. Return to Live to change this task.")); return panel; }
-  if (studioMessage) panel.append(el("p", { id: "studio-control-status", role: "status", "aria-live": "polite" }, studioMessage));
+    el("span", { class: "chip" }, t("BROWSER PRODUCTION")),
+    el("h2", { id: "studio-control-heading" }, t(stateLabel(task.state))),
+    el("p", { class: "studio-meta" }, t("{task} · {provider} / {model} · version {version}", { task: task.task_id, provider: task.config_snapshot.provider, model: task.config_snapshot.model, version: task.version })),
+    el("p", { class: "studio-meta" }, costText),
+    el("a", { href: localePath(`/studio?task=${encodeURIComponent(task.task_id)}`) }, t("View task in Studio")));
+  if (replay) { panel.append(el("p", {}, t("You are viewing history. Return to Live to change this task."))); return panel; }
+  if (studioMessage) panel.append(el("p", { id: "studio-control-status", role: "status", "aria-live": "polite" }, t(studioMessage)));
   if (task.error) panel.append(el("p", { class: "studio-error", role: "alert" }, task.error.message));
   function button(id, label, action, primary = false) {
-    const node = el("button", { id, type: "button", class: primary ? "primary" : "", onclick: action }, label);
+    const node = el("button", { id, type: "button", class: primary ? "primary" : "", onclick: action }, t(label));
     node.disabled = studioBusy || !studioAvailable; return node;
   }
   const gate = task.state === "awaiting_approval" && task.approval?.status === "pending" ? task.approval : null;
@@ -1260,15 +1311,15 @@ function renderStudioControls() {
     const draft = studioDrafts.get(key) || { comment: "", options: [] };
     studioDrafts.set(key, draft);
     panel.setAttribute("data-gate-id", gate.binding.gate_id);
-    panel.append(el("h2", {}, `${stateLabel(gate.stage)} review`),
+    panel.append(el("h2", {}, t("{stage} review", { stage: t(stateLabel(gate.stage)) })),
       el("p", { class: "studio-summary" }, gate.summary),
-      el("p", { class: "studio-meta" }, `Artifact revision ${gate.binding.artifact_revision} · checkpoint revision ${gate.binding.checkpoint_revision}`),
-      el("p", {}, `${gate.scope.provider} / ${gate.scope.model}${gate.scope.render_runtime ? ` · render: ${gate.scope.render_runtime}` : ""} · budget ${moneyMicros(gate.scope.budget_usd_micros)}`));
+      el("p", { class: "studio-meta" }, t("Artifact revision {artifact} · checkpoint revision {checkpoint}", { artifact: gate.binding.artifact_revision, checkpoint: gate.binding.checkpoint_revision })),
+      el("p", {}, t("{provider} / {model}{runtime} · budget {budget}", { provider: gate.scope.provider, model: gate.scope.model, runtime: gate.scope.render_runtime ? t(" · render: {runtime}", { runtime: gate.scope.render_runtime }) : "", budget: t(moneyMicros(gate.scope.budget_usd_micros)) })));
     if (gate.scope.unknown_price) panel.append(el("p", {},
-      `The price is unquoted. This approval reserves up to ${moneyMicros(gate.scope.authorized_limit_usd_micros)} as an estimate; it is not a hard limit on the gateway's actual charge.`));
-    panel.append(el("a", { href: mediaURL(projectId, gate.artifact.path), target: "_blank", rel: "noopener" }, "Open the exact review artifact"));
+      t("The price is unquoted. This approval reserves up to {amount} as an estimate; it is not a hard limit on the gateway's actual charge.", { amount: t(moneyMicros(gate.scope.authorized_limit_usd_micros)) })));
+    panel.append(el("a", { href: mediaURL(projectId, gate.artifact.path), target: "_blank", rel: "noopener" }, t("Open the exact review artifact")));
     if (gate.options?.length) {
-      const choices = el("fieldset", {}, el("legend", {}, "Available choices — changing the displayed scope requests a revision"));
+      const choices = el("fieldset", {}, el("legend", {}, t("Available choices — changing the displayed scope requests a revision")));
       for (const option of gate.options) {
         const input = el("input", { type: "checkbox", value: option.option_id, name: "gate-option", "aria-label": option.label });
         input.checked = draft.options.includes(option.option_id); input.disabled = studioBusy;
@@ -1286,7 +1337,7 @@ function renderStudioControls() {
     const comment = el("textarea", { id: "revision-comment", maxlength: "10000", rows: "3" });
     comment.value = draft.comment; comment.disabled = studioBusy;
     comment.addEventListener("input", () => { draft.comment = comment.value; });
-    panel.append(el("label", { for: "revision-comment" }, "Revision feedback (required when requesting changes)"), comment);
+    panel.append(el("label", { for: "revision-comment" }, t("Revision feedback (required when requesting changes)")), comment);
     const approve = button("approve-gate", "Approve this version", () => sendStudioAction("approve", task, gate, draft), true);
     approve.disabled = studioBusy || !studioAvailable || draft.options.some((id) => id !== "keep-current" && id !== gate.scope.render_runtime);
     panel.append(el("div", { class: "studio-actions" }, approve,
@@ -1296,23 +1347,23 @@ function renderStudioControls() {
   }
   if (["blocked", "failed", "recovery_required"].includes(task.state)) {
     if (Array.isArray(task.pending_calls)) for (const call of task.pending_calls) {
-      panel.append(el("p", { class: "studio-meta" }, `${call.kind || "External call"} · ${call.status}${call.external_job_id ? ` · submitted job ${call.external_job_id}` : ""}`));
+      panel.append(el("p", { class: "studio-meta" }, t("{kind} · {status}{job}", { kind: call.kind || t("External call"), status: t(stateLabel(call.status)), job: call.external_job_id ? t(" · submitted job {job}", { job: call.external_job_id }) : "" })));
     }
     const actions = el("div", { class: "studio-actions" });
     if (task.error?.recovery_actions?.includes("resume")) actions.append(button("resume-task", "Resume after reconciliation", () => sendStudioAction("resume", task)));
     if (task.error?.recovery_actions?.includes("reconcile")) {
-      panel.append(el("p", {}, "Reconciliation is required before continuing. Unknown paid submissions will not be sent again."));
+      panel.append(el("p", {}, t("Reconciliation is required before continuing. Unknown paid submissions will not be sent again.")));
       actions.append(button("refresh-recovery", "Refresh reconciliation details", () => refresh()));
     }
     panel.append(actions);
   }
   if (!["succeeded", "failed", "cancelled", "cancel_requested"].includes(task.state) && !gate) panel.append(
     el("div", { class: "studio-actions" }, button("cancel-task", "Cancel task", () => sendStudioAction("cancel", task))));
-  if (task.state === "cancel_requested" || task.state === "cancelled") panel.append(el("p", {}, "Local cancellation does not revoke submitted remote jobs or refund their charges."));
+  if (task.state === "cancel_requested" || task.state === "cancelled") panel.append(el("p", {}, t("Local cancellation does not revoke submitted remote jobs or refund their charges.")));
   if (task.state === "succeeded" && task.result?.verified) {
-    panel.append(el("h2", {}, "Verified final video"),
+    panel.append(el("h2", {}, t("Verified final video")),
       el("video", { id: "studio-final-video", controls: "", preload: "metadata", src: localURL(task.result.preview_url) }),
-      el("a", { id: "download-video", href: localURL(task.result.download_url), download: "" }, "Download verified video"));
+      el("a", { id: "download-video", href: localURL(task.result.download_url), download: "" }, t("Download verified video")));
   }
   return panel;
 }

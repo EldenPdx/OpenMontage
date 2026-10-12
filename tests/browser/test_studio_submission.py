@@ -55,9 +55,12 @@ def studio_browser(repo, *, viewport=None, projects_dir=None):
     with serving(app) as base_url, sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         page = browser.new_page(viewport=viewport or {"width": 1280, "height": 900})
+        page_errors = []
+        page.on("pageerror", lambda error: page_errors.append(str(error)))
         page.route("**/*", lambda route: route.continue_() if route.request.url.startswith(base_url) else route.abort())
         try:
             yield page, base_url
+            assert page_errors == []
         finally:
             browser.close()
             patch.undo()
@@ -65,7 +68,7 @@ def studio_browser(repo, *, viewport=None, projects_dir=None):
 
 def test_browser_creates_a_durable_task_once_and_refresh_does_not_submit_again():
     with isolated_repository() as repo, studio_browser(repo) as (page, base_url):
-        page.goto(base_url + "/studio")
+        page.goto(base_url + "/en/studio")
         expect(page.locator("#studio-form")).to_be_visible(timeout=1500)
         page.locator("#brief").fill("A short animation about a lighthouse")
         page.locator("#profile").select_option("local")
@@ -82,7 +85,7 @@ def test_browser_creates_a_durable_task_once_and_refresh_does_not_submit_again()
         assert "private-browser-credential" not in page.content()
         storage = page.evaluate("JSON.stringify({...localStorage})")
         assert "private-browser-credential" not in storage
-        expect(page.locator("#current-task a[href^='/p/']")).to_be_visible()
+        expect(page.locator("#current-task a[href^='/en/p/']")).to_be_visible()
 
 
 @pytest.mark.parametrize("delayed_path", ["/api/studio/config", "/api/studio/tasks"])
@@ -96,7 +99,7 @@ def test_ready_form_submits_once_during_slow_config_or_task_list_initialization(
                 route.continue_()
         page.route("**" + delayed_path, hold_initial_read)
         with page.expect_request(base_url + delayed_path):
-            page.goto(base_url + "/studio")
+            page.goto(base_url + "/en/studio")
         if delayed_path == "/api/studio/config":
             expect(page.locator("#create-task")).to_be_disabled(timeout=1000)
             pending[0].continue_()
@@ -126,7 +129,7 @@ def test_lost_create_response_reuses_the_saved_key_after_reload_and_mobile_layou
             else:
                 route.continue_()
         page.route("**/api/studio/tasks", lose_first_response)
-        page.goto(base_url + "/studio")
+        page.goto(base_url + "/en/studio")
         page.locator("#brief").fill("A lighthouse with a blue light")
         page.locator("#create-task").click()
         expect(page.locator("#studio-status")).to_contain_text("request key is saved")
@@ -144,7 +147,7 @@ def test_task_state_stream_updates_and_cancel_remains_a_request():
     from production.contracts import TaskState
 
     with isolated_repository() as repo, studio_browser(repo) as (page, base_url):
-        page.goto(base_url + "/studio")
+        page.goto(base_url + "/en/studio")
         page.locator("#brief").fill("A short local lighthouse video")
         page.locator("#create-task").click()
         expect(page.locator("#current-task")).to_contain_text("Queued")
@@ -173,7 +176,7 @@ def test_expired_csrf_session_is_refreshed_without_changing_submission_key():
             else:
                 route.continue_()
         page.route("**/api/studio/tasks",expire_once)
-        page.goto(base_url+"/studio")
+        page.goto(base_url+"/en/studio")
         page.locator("#brief").fill("A lighthouse after a service restart")
         page.locator("#create-task").click()
         expect(page.locator("#current-task")).to_contain_text("Queued")

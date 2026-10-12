@@ -11,6 +11,15 @@ python -m backlot open                # library view (all projects)
 python -m backlot serve --port 4750   # run the server in the foreground
 ```
 
+## Interface languages
+
+The library (`/zh`), Studio (`/zh/studio`), and production boards
+(`/zh/p/<project-id>`) default to Simplified Chinese. Header tabs switch to
+Japanese (`/ja/...`) or English (`/en/...`) and update the URL without clearing
+unsent form input. The URL selects the language on reload and shared links;
+unprefixed page URLs redirect to Chinese. Project content keeps its original
+language. No frontend package installation or build step is required.
+
 ## How it stays live
 
 No agent involvement. A `watchfiles` watcher on `projects/` publishes change

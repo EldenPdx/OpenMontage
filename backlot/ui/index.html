@@ -3,8 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Backlot — Library</title>
+<title data-i18n="Backlot — Library">Backlot — Library</title>
 <link rel="stylesheet" href="/ui/board.css">
+<link rel="stylesheet" href="/ui/i18n.css">
 </head>
 <body>
 <div class="wrap">
@@ -12,15 +13,17 @@
     <div class="clapper"></div>
     <div>
       <span class="wordmark">Backlot</span>
-      <h1>Library</h1>
+      <h1 data-i18n="Library">Library</h1>
     </div>
     <span class="chip" id="count"></span>
     <div class="spacer"></div>
-    <a class="chip" id="studio-link" href="/studio">Production Studio</a>
-    <span class="live idle" id="liveBadge"><span class="dot"></span><span id="liveText">IDLE</span></span>
+    <a class="chip" id="studio-link" href="/studio" data-locale-link data-i18n="Production Studio">Production Studio</a>
+    <span class="live idle" id="liveBadge"><span class="dot"></span><span id="liveText" data-i18n="IDLE">IDLE</span></span>
   </header>
-  <div class="lib-grid" id="grid"></div>
-  <p class="hint" id="empty" style="display:none">No projects yet — run a production and it will appear here.</p>
+  <section id="language-panel" role="tabpanel" tabindex="0" aria-labelledby="language-tab-zh">
+    <div class="lib-grid" id="grid"></div>
+    <p class="hint" id="empty" style="display:none" data-i18n="No projects yet — create a task in Production Studio or run a production with the CLI.">No projects yet — run a production and it will appear here.</p>
+  </section>
 </div>
 <script type="module" src="/ui/library.js"></script>
 </body>

@@ -58,7 +58,7 @@ def test_browser_approves_current_cost_gate_once_with_exact_binding_and_no_fake_
         with studio_browser(repo,projects_dir=tmp_path) as (page,base_url):
             errors=[]
             page.on("pageerror",lambda error:errors.append(str(error)))
-            page.goto(base_url+f"/p/{task.project_id}?task={task.task_id}")
+            page.goto(base_url+f"/en/p/{task.project_id}?task={task.task_id}")
             expect(page.locator("#studio-controls")).to_be_visible(timeout=2000)
             expect(page.locator("#studio-controls")).to_contain_text("price is unquoted")
             expect(page.locator("#studio-controls")).to_contain_text("$0.25")
@@ -79,7 +79,7 @@ def test_canonical_production_gates_display_reviewable_artifacts_and_approve_exa
     with isolated_repository() as repo:
         task = pending_gate(repo,tmp_path,stage=stage,summary=f"Review this {stage} before continuing")
         with studio_browser(repo,projects_dir=tmp_path) as (page,base_url):
-            page.goto(base_url+f"/p/{task.project_id}")
+            page.goto(base_url+f"/en/p/{task.project_id}")
             expect(page.locator("#studio-controls")).to_be_visible()
             expect(page.locator(".approval-review")).to_be_visible()
             expect(page.locator("#studio-controls")).to_contain_text("Artifact revision 1")
@@ -92,7 +92,7 @@ def test_runtime_change_requires_revision_and_feedback_is_plain_text(tmp_path):
     with isolated_repository() as repo:
         task = pending_gate(repo,tmp_path,stage="script",summary="Review <script>window.injected=1</script>")
         with studio_browser(repo,projects_dir=tmp_path,viewport={"width":390,"height":844}) as (page,base_url):
-            page.goto(base_url+f"/p/{task.project_id}")
+            page.goto(base_url+f"/en/p/{task.project_id}")
             expect(page.locator("#studio-controls")).to_be_visible()
             page.get_by_role("checkbox",name="Use HyperFrames",exact=True).check()
             expect(page.locator("#approve-gate")).to_be_disabled()
@@ -119,7 +119,7 @@ def test_changed_artifact_is_not_approved_and_current_gate_is_refetched(tmp_path
                 (tmp_path/task.project_id/task.approval.artifact.path).write_text('{"changed":true}',encoding="utf-8")
                 route.continue_()
             page.route("**/approvals/*/decision",change_before_submit)
-            page.goto(base_url+f"/p/{task.project_id}")
+            page.goto(base_url+f"/en/p/{task.project_id}")
             page.locator("#approve-gate").click()
             expect(page.locator("#studio-control-status")).to_contain_text("version changed")
             assert repo.get_task(task.task_id).approval.status=="pending"
@@ -144,7 +144,7 @@ def test_recovery_requires_reconciliation_and_never_turns_unknown_submission_int
                             updates={"error":ErrorDTO(code="outcome_unknown",message="Remote acceptance has no reliable receipt",recovery_actions=["reconcile","cancel"])})
         repo.finish_command(claim)
         with studio_browser(repo,projects_dir=tmp_path) as (page,base_url):
-            page.goto(base_url+f"/p/{task.project_id}")
+            page.goto(base_url+f"/en/p/{task.project_id}")
             expect(page.locator("#studio-control-heading")).to_have_text("Recovery required")
             expect(page.locator("#studio-controls")).to_contain_text("Unknown paid submissions will not be sent again")
             assert page.locator("#resume-task").count()==0
@@ -158,12 +158,12 @@ def test_legacy_project_keeps_artifacts_readable_and_has_no_studio_actions(tmp_p
 
     init_project("legacy-browser",title="Legacy browser project",pipeline_type="cinematic",pipeline_dir=tmp_path)
     with isolated_repository() as repo, studio_browser(repo,projects_dir=tmp_path) as (page,base_url):
-        page.goto(base_url+"/p/legacy-browser")
+        page.goto(base_url+"/en/p/legacy-browser")
         expect(page.locator(".slate h1")).to_have_text("Legacy browser project")
         assert page.locator("#studio-controls").count()==0
         assert page.locator("#approve-gate").count()==0
         assert page.locator("#cancel-task").count()==0
-        page.goto(base_url+"/")
+        page.goto(base_url+"/en")
         expect(page.locator("#studio-link")).to_be_visible()
 
 
@@ -184,7 +184,7 @@ def test_known_job_recovery_shows_receipt_and_resume_only_requeues_existing_work
                             updates={"error":ErrorDTO(code="rpc_error",message="The local worker stopped after submission",recovery_actions=["resume","cancel"])})
         repo.finish_command(claim)
         with studio_browser(repo,projects_dir=tmp_path) as (page,base_url):
-            page.goto(base_url+f"/p/{task.project_id}")
+            page.goto(base_url+f"/en/p/{task.project_id}")
             expect(page.locator("#studio-controls")).to_contain_text("remote-job-existing")
             page.locator("#resume-task").click()
             expect(page.locator("#studio-control-heading")).to_have_text("Queued")

@@ -1,4 +1,12 @@
-import { el, getJSON } from "/ui/lib.js";
+import { el, getJSON, fmtMoney } from "/ui/lib.js";
+import { t, localePath, initI18n, languageTabs } from "/ui/i18n.js";
+import "/ui/studio-i18n.js";
+
+function clientError(message) {
+  const error = new Error(t(message));
+  error.i18nKey = message;
+  return error;
+}
 
 let configPromise;
 export function studioConfig(refresh = false) {
@@ -10,7 +18,7 @@ export async function studioAction(path, body) {
   const storageKey = `backlot.studio.pending:${path}`;
   const encoded = JSON.stringify(body);
   let pending = JSON.parse(localStorage.getItem(storageKey) || "null");
-  if (pending && pending.body !== encoded) throw new Error("The previous request outcome is unconfirmed. Refresh this task before choosing another action.");
+  if (pending && pending.body !== encoded) throw clientError("The previous request outcome is unconfirmed. Refresh this task before choosing another action.");
   if (!pending) {
     pending = { key: crypto.randomUUID(), body: encoded };
     localStorage.setItem(storageKey, JSON.stringify(pending));
@@ -24,14 +32,15 @@ export async function studioAction(path, body) {
     response = await send();
     if (response.status === 403) { config = await studioConfig(true); response = await send(); }
   } catch {
-    throw new Error("Connection lost. The request key is saved; retry this same action to confirm its outcome.");
+    throw clientError("Connection lost. The request key is saved; retry this same action to confirm its outcome.");
   }
   let result;
   try { result = await response.json(); }
-  catch { throw new Error("The service response is unconfirmed. The request key is saved; retry this same action."); }
+  catch { throw clientError("The service response is unconfirmed. The request key is saved; retry this same action."); }
   if (!response.ok) {
     if (response.status < 500) localStorage.removeItem(storageKey);
-    const error = new Error(result.error?.message || "The task request failed.");
+    const error = result.error?.message ? new Error(result.error.message) : clientError("The task request failed.");
+    error.serverMessage = !!result.error?.message;
     error.status = response.status;
     throw error;
   }
@@ -55,90 +64,147 @@ export function subscribeTask(taskId, onChange) {
 }
 
 export function stateLabel(value) {
-  const text = String(value || "unknown").replaceAll("_", " ");
+  const text = t(String(value || "unknown")).replaceAll("_", " ");
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 export function moneyMicros(value) {
-  return value == null ? "Unquoted" : `$${(Number(value) / 1_000_000).toFixed(2)}`;
+  return value == null ? t("Unquoted") : fmtMoney(Number(value) / 1_000_000);
 }
 
 export function costLabel(task) {
   const cost = task.cost || {};
-  const known = `${moneyMicros(cost.spent_usd_micros)} recorded · ${moneyMicros(cost.reserved_usd_micros)} reserved`;
-  return cost.price_status === "unquoted" || cost.unknown_call_count > 0 ? `Unquoted cost · ${known}` : known;
+  const known = t("{spent} recorded · {reserved} reserved", { spent: moneyMicros(cost.spent_usd_micros), reserved: moneyMicros(cost.reserved_usd_micros) });
+  return cost.price_status === "unquoted" || cost.unknown_call_count > 0 ? t("Unquoted cost · {cost}", { cost: known }) : known;
 }
 
 export function localURL(value) {
   if (typeof value !== "string" || !value.startsWith("/")) return "#";
   const url = new URL(value, location.origin);
-  return url.origin === location.origin ? url.pathname + url.search + url.hash : "#";
+  return url.origin === location.origin ? localePath(url.pathname + url.search + url.hash) : "#";
 }
 
 const form = document.getElementById("studio-form");
 if (form) initializeStudio();
 
 async function initializeStudio() {
+  initI18n();
+  document.querySelector(".slate").append(languageTabs());
   document.documentElement.dataset.theme = localStorage.getItem("backlot.theme") === "light" ? "light" : "dark";
   const status = document.getElementById("studio-status");
   const profileSelect = document.getElementById("profile");
   const submit = document.getElementById("create-task");
-  let config, selectedId, stream, submitting = false, refreshPromise;
-  const announce = (message, error = false) => { status.textContent = message; status.classList.toggle("error", error); };
+  let config, selectedId, stream, tasks, currentTask, cancellingId, submitting = false, refreshPromise;
+  let announcement = { message: "Loading available profiles…", error: false, translate: true };
+  function renderStatus() {
+    status.textContent = announcement.translate ? t(announcement.message) : announcement.message;
+    status.classList.toggle("error", announcement.error);
+  }
+  function announce(message, error = false, translate = true) {
+    announcement = { message, error, translate };
+    status.removeAttribute("data-i18n");
+    renderStatus();
+  }
+  function announceError(error, fallback) {
+    const generated = error?.i18nKey;
+    const useFallback = !error?.serverMessage && (!error?.message || error instanceof TypeError || error instanceof SyntaxError || /^\d{3} \/api\/studio(?:\/|\?|$)/.test(error.message));
+    announce(generated || (useFallback ? fallback : error.message), true, !!generated || useFallback);
+  }
+  function renderProfiles() {
+    for (const option of profileSelect.options) {
+      const profile = config.profiles.find((item) => item.profile_id === option.value);
+      option.textContent = `${profile.profile_id} · ${profile.model}${profile.ready ? "" : ` ${t("(not configured)")}`}`;
+    }
+    profileInfo();
+  }
   function profileInfo() {
     const profile = config.profiles.find((item) => item.profile_id === profileSelect.value);
     document.getElementById("profile-info").textContent = profile
-      ? `${profile.provider} · ${profile.model} · ${profile.price_status === "unquoted" ? "Fees are unquoted; the budget is an estimate." : "Estimated pricing configured."}` : "No configured profile is available.";
+      ? `${profile.provider} · ${profile.model} · ${t(profile.price_status === "unquoted" ? "Fees are unquoted; the budget is an estimate." : "Estimated pricing configured.")}` : t("No configured profile is available.");
     submit.disabled = submitting || !config.ready || !profile?.ready;
   }
   function taskCard(task, current = false) {
     const actions = el("div", { class: "studio-task-actions" },
-      el("a", { href: localURL(task.board_url || `/p/${encodeURIComponent(task.project_id)}`) }, "Open production board"));
-    if (!current) actions.append(el("button", { type: "button", onclick: () => selectTask(task.task_id) }, "View task"));
+      el("a", { href: localURL(task.board_url || `/p/${encodeURIComponent(task.project_id)}`) }, t("Open production board")));
+    if (!current) actions.append(el("button", { type: "button", onclick: () => selectTask(task.task_id).catch((error) => announceError(error, "Could not load tasks. Please try again.")) }, t("View task")));
     if (current && !["succeeded", "failed", "cancelled", "cancel_requested"].includes(task.state)) {
       const cancel = el("button", { type: "button", onclick: async () => {
-        cancel.disabled = true;
+        cancellingId = task.task_id; cancel.disabled = true;
         try { await studioAction(`/api/studio/tasks/${task.task_id}/cancel`, { expected_version: task.version }); announce("Cancellation requested. Remote work may still finish and charge."); }
-        catch (error) { announce(error.message, true); }
-        await refresh();
-      } }, "Cancel task");
+        catch (error) { announceError(error, "Could not cancel the task. Please try again."); }
+        finally { cancellingId = null; }
+        await refresh().catch((error) => announceError(error, "Could not load tasks. Please try again."));
+      } }, t("Cancel task"));
+      cancel.disabled = cancellingId === task.task_id;
       actions.append(cancel);
     }
     const card = el("article", { class: "studio-task", "data-task-id": task.task_id },
       el("span", { class: "chip" }, stateLabel(task.state)), el("h3", {}, task.request?.brief || task.task_id),
       el("p", { class: "studio-task-meta" }, `${task.task_id} · ${task.config_snapshot?.model || ""}`),
       el("p", { class: "studio-task-meta" }, costLabel(task)),
-      task.current_stage ? el("p", { class: "studio-task-meta" }, `Stage: ${stateLabel(task.current_stage)}`) : null,
-      task.error ? el("p", { class: "studio-status error" }, task.error.message) : null, actions);
+      task.current_stage ? el("p", { class: "studio-task-meta" }, t("Stage: {stage}", { stage: stateLabel(task.current_stage) })) : null,
+      task.error ? el("p", { class: "studio-status error" }, task.error.message || t("The task request failed.")) : null, actions);
     if (current && task.state === "succeeded" && task.result?.verified) {
-      card.append(el("video", { controls: "", preload: "metadata", src: localURL(task.result.preview_url) }),
-        el("a", { href: localURL(task.result.download_url), download: "" }, "Download verified video"));
+      card.append(el("video", { controls: "", preload: "metadata", src: localURL(task.result.preview_url), "aria-label": t("Verified final video") }),
+        el("a", { href: localURL(task.result.download_url), download: "" }, t("Download verified video")));
     }
     return card;
+  }
+  function renderTasks() {
+    if (!tasks) return;
+    const list = document.getElementById("task-list");
+    list.replaceChildren(...tasks.filter((task) => task.task_id !== selectedId).map((task) => taskCard(task)));
+    if (!tasks.length) list.append(el("p", { class: "studio-hint" }, t("Your queued and completed tasks will appear here.")));
+    document.getElementById("current-task").replaceChildren(...(currentTask && currentTask.task_id === selectedId ? [taskCard(currentTask, true)] : []));
   }
   async function refresh() {
     if (refreshPromise) return refreshPromise;
     refreshPromise = (async () => {
-      const tasks = await getJSON("/api/studio/tasks");
-      const list = document.getElementById("task-list");
-      list.replaceChildren(...tasks.filter((task) => task.task_id !== selectedId).map((task) => taskCard(task)));
-      if (!tasks.length) list.append(el("p", { class: "studio-hint" }, "Your queued and completed tasks will appear here."));
+      tasks = await getJSON("/api/studio/tasks");
       if (selectedId) {
-        const task = await getJSON(`/api/studio/tasks/${encodeURIComponent(selectedId)}`);
-        document.getElementById("current-task").replaceChildren(taskCard(task, true));
-        if (["succeeded", "cancelled", "failed"].includes(task.state)) stream?.close();
+        const taskId = selectedId;
+        const task = await getJSON(`/api/studio/tasks/${encodeURIComponent(taskId)}`);
+        if (taskId === selectedId) {
+          currentTask = task;
+          if (["succeeded", "cancelled", "failed"].includes(task.state)) stream?.close();
+        }
       }
+      renderTasks();
     })().finally(() => { refreshPromise = null; });
     return refreshPromise;
   }
   async function selectTask(taskId) {
     selectedId = taskId;
     localStorage.setItem("backlot.studio.last-task", taskId);
-    const url = new URL(location.href); url.searchParams.set("task", taskId); history.replaceState(null, "", url);
+    const url = new URL(location.href);
+    if (url.searchParams.get("task") !== taskId) { url.searchParams.set("task", taskId); history.replaceState(null, "", url); }
     stream?.close();
-    stream = subscribeTask(taskId, () => refresh().catch((error) => announce(error.message, true)));
+    stream = subscribeTask(taskId, () => refresh().catch((error) => announceError(error, "Could not load tasks. Please try again.")));
     await refresh();
   }
+  function localizeValidity(field) {
+    if (!field.willValidate) return;
+    field.setCustomValidity("");
+    const validity = field.validity;
+    const message = validity.badInput ? t("Enter a number.")
+      : validity.valueMissing ? t(field.id === "profile" ? "Choose an agent profile." : "Complete this field.")
+      : validity.tooShort ? t("Use at least {count} characters.", { count: field.minLength })
+      : validity.tooLong ? t("Use no more than {count} characters.", { count: field.maxLength })
+      : validity.rangeUnderflow ? t("Enter a value of at least {min}.", { min: field.min })
+      : validity.rangeOverflow ? t("Enter a value no greater than {max}.", { max: field.max })
+      : validity.stepMismatch ? t("Use increments of {step}.", { step: field.step })
+      : !validity.valid ? t("Enter a valid value.") : "";
+    field.setCustomValidity(message);
+  }
+  form.addEventListener("invalid", (event) => localizeValidity(event.target), true);
+  form.addEventListener("input", (event) => event.target.setCustomValidity?.(""));
+  window.addEventListener("languagechange", () => {
+    renderStatus();
+    if (config) renderProfiles();
+    renderTasks();
+    for (const field of form.elements) localizeValidity(field);
+  });
+  window.addEventListener("pagehide", () => stream?.close());
   form.addEventListener("submit", async (event) => {
     event.preventDefault(); if (submitting || !config?.ready || !form.reportValidity()) return;
     submitting = true; profileInfo(); form.setAttribute("aria-busy", "true");
@@ -150,19 +216,19 @@ async function initializeStudio() {
         budget_usd_micros: Math.round(Number(document.getElementById("budget").value) * 1_000_000),
       });
       announce("Task queued. Open its board to review the production."); await selectTask(task.task_id);
-    } catch (error) { announce(error.message, true); }
+    } catch (error) { announceError(error, "Could not create the task. Please try again."); }
     finally { submitting = false; profileInfo(); form.setAttribute("aria-busy", "false"); }
   });
   try {
     config = await studioConfig();
     for (const profile of config.profiles) {
-      const option = el("option", { value: profile.profile_id }, `${profile.profile_id} · ${profile.model}${profile.ready ? "" : " (not configured)"}`);
+      const option = el("option", { value: profile.profile_id });
       option.disabled = !profile.ready; profileSelect.append(option);
     }
     profileSelect.value = config.default_profile;
     if (!config.profiles.find((item) => item.profile_id === profileSelect.value)?.ready) profileSelect.value = config.profiles.find((item) => item.ready)?.profile_id || "";
     document.getElementById("production-inputs").disabled = !config.ready;
-    profileSelect.addEventListener("change", profileInfo); profileInfo();
+    profileSelect.addEventListener("change", profileInfo); renderProfiles();
     if (!config.ready) { announce(config.unavailable_reason || "Studio is unavailable. Configure the backend to enable execution.", true); return; }
     announce("Ready. Tasks continue running when this browser is closed.");
     const pending = JSON.parse(localStorage.getItem("backlot.studio.pending:/api/studio/tasks") || "null");
@@ -174,11 +240,11 @@ async function initializeStudio() {
       document.getElementById("aspect-ratio").value = draft.aspect_ratio;
       document.getElementById("budget").value = draft.budget_usd_micros / 1_000_000;
       document.getElementById("narration").checked = draft.narration;
+      profileInfo();
       announce("A previous submission is unconfirmed. Submit the same brief to recover its saved request.");
     }
     await refresh();
     const savedId = new URLSearchParams(location.search).get("task") || localStorage.getItem("backlot.studio.last-task");
-    if (savedId) await selectTask(savedId);
-  } catch (error) { announce(error.message, true); }
-  window.addEventListener("pagehide", () => stream?.close());
+    if (savedId && savedId !== selectedId) await selectTask(savedId);
+  } catch (error) { announceError(error, config ? "Could not load tasks. Please try again." : "Could not load Studio. Please try again."); }
 }
