@@ -42,7 +42,7 @@ def running_worker(worker):
 def test_browser_submits_revises_approves_plays_and_downloads_real_local_video(tmp_path, monkeypatch, request):
     require_pi()
     projects, runtime = tmp_path / "projects", tmp_path / "runtime"
-    monkeypatch.setattr(backlot.server, "PROJECTS_DIR", projects)
+    monkeypatch.setattr(__import__("backlot.projects_api", fromlist=["PROJECTS_DIR"]), "PROJECTS_DIR", projects)
     monkeypatch.setattr(backlot.state, "PROJECTS_DIR", projects)
     with isolated_repository() as repo:
         flow = ProductionFlow(repo, projects)
@@ -103,6 +103,7 @@ def test_browser_submits_revises_approves_plays_and_downloads_real_local_video(t
                     expect(page.locator("#studio-control-heading")).to_have_text("Succeeded", timeout=30000)
                     video = page.locator("#studio-final-video")
                     expect(video).to_be_visible()
+                    video.scroll_into_view_if_needed()
                     page.wait_for_function("document.getElementById('studio-final-video')?.readyState >= 2")
                     assert video.evaluate("video => video.duration") == pytest.approx(2, abs=0.1)
                     video.evaluate("video => video.play()")

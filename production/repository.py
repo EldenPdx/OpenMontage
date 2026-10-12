@@ -12,15 +12,15 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from production.contracts import (
-    ApprovalRequest, CallIntent, ClaimedCommand, ConfigSnapshot, ContractViolation, CostSnapshot, ErrorDTO,
+    Actor, AuditEntry, ApprovalRequest, CallIntent, ClaimedCommand, ConfigSnapshot, ContractViolation, CostSnapshot, ErrorDTO,
     FileWriteIntent,
-    RunContext, SessionReference, StudioEvent, TaskCommand, TaskCreate, TaskRecord,
-    TaskState, canonical_sha256, check_approval, check_transition,
+    ResourceOwnership, RunContext, SessionReference, StudioEvent, TaskCommand, TaskCreate, TaskRecord,
+    TaskState, WorkspaceContext, canonical_sha256, check_approval, check_transition,
 )
 
 
 def _json(value):
-    value = value.model_dump(mode="json") if hasattr(value, "model_dump") else value
+    value = value.model_dump(mode="json", context={"persistence": True}) if hasattr(value, "model_dump") else value
     _reject_credentials(value)
     return Jsonb(value)
 
@@ -29,7 +29,9 @@ def _reject_credentials(value):
     if isinstance(value, dict):
         for key, item in value.items():
             normalized = str(key).lower().replace("-", "_")
-            if normalized in {"authorization", "headers", "env", "environment", "password", "secret", "access_token", "api_key"} or normalized.endswith("_api_key"):
+            if normalized in {"authorization", "headers", "env", "environment", "password", "secret", "access_token", "api_key",
+                              "refresh_token", "refreshtoken", "id_token", "idtoken", "accesstoken", "accesstokenmap", "signinsession",
+                              "client_secret", "m2m_secret", "ticket", "code_verifier", "sdk_storage", "csrf_token", "session_cookie", "raw_assertion"} or normalized.endswith("_api_key"):
                 raise ContractViolation("Credentials cannot be stored in control-plane records", "forbidden")
             _reject_credentials(item)
     elif isinstance(value, (list, tuple)):
@@ -42,11 +44,12 @@ def _now():
 
 
 class PostgresRepository:
-    def __init__(self, dsn: str, *, schema: str = "studio"):
+    def __init__(self, dsn: str, *, schema: str = "studio", projects_dir=None):
         if not re.fullmatch(r"[a-z][a-z0-9_]{0,62}", schema):
             raise ContractViolation("Invalid trusted database schema")
         self._dsn = dsn
         self.schema = schema
+        self.projects_dir = Path(projects_dir).resolve() if projects_dir is not None else None
 
     @contextmanager
     def _connection(self):
@@ -88,30 +91,116 @@ class PostgresRepository:
             raise ContractViolation("Conflicting idempotency key", "idempotency_conflict")
         return row["response"] if row else None
 
-    def create_task(self, request: TaskCreate, snapshot: ConfigSnapshot, idempotency_key: str):
+    @staticmethod
+    def _acceptance(workspace, actor):
+        if (workspace is None) != (actor is None):
+            raise ContractViolation("Workspace and actor must be supplied together")
+        if actor is None:
+            return None, None
+        workspace, actor = WorkspaceContext.model_validate(workspace), Actor.model_validate(actor)
+        if workspace != actor.workspace:
+            raise ContractViolation("Actor workspace differs from accepted workspace")
+        return workspace, actor
+
+    @staticmethod
+    def _scope(operation, resource, actor):
+        if actor is None:
+            return operation + (":" + resource if resource else "")
+        return canonical_sha256({"issuer": actor.identity.issuer, "sub": actor.identity.sub,
+                                 "workspace": actor.workspace.model_dump(), "operation": operation, "resource": resource})
+
+    def _remember_actor(self, connection, actor):
+        if actor is None:
+            return
+        identity = actor.identity
+        connection.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (identity.issuer + ":" + identity.sub,))
+        rows = connection.execute("SELECT * FROM identity_users WHERE user_id=%s OR (issuer=%s AND sub=%s)",
+                                  (identity.user_id, identity.issuer, identity.sub)).fetchall()
+        if rows and (len(rows) != 1 or dict(rows[0]) != identity.model_dump()):
+            raise ContractViolation("Identity is immutable", "state_conflict")
+        if not rows:
+            connection.execute("INSERT INTO identity_users VALUES (%s,%s,%s)", (identity.user_id, identity.issuer, identity.sub))
+
+    def database_binding(self):
+        with self._connection() as connection:
+            return str(connection.execute("SELECT binding_id FROM identity_binding WHERE singleton").fetchone()["binding_id"])
+
+    def assert_legacy_root(self, *, expected_binding: str):
+        """Trusted startup/operations proof against a previously retained root binding."""
+        with self._connection() as connection:
+            row = connection.execute("""SELECT binding_id,
+                EXISTS(SELECT 1 FROM schema_migrations WHERE version=3) AS registry_known,
+                (EXISTS(SELECT 1 FROM tasks WHERE workspace_kind IS NOT NULL OR owner_id IS NOT NULL
+                        OR COALESCE(record->'ownership','null'::jsonb) <> 'null'::jsonb)
+                 OR EXISTS(SELECT 1 FROM project_owners WHERE workspace_kind IS NOT NULL OR owner_id IS NOT NULL OR ownership IS NOT NULL)) AS owned
+                FROM identity_binding WHERE singleton""").fetchone()
+            if row is None or not row["registry_known"] or str(row["binding_id"]) != expected_binding or row["owned"]:
+                raise ContractViolation("Legacy root ownership could not be verified", "identity_unavailable")
+
+    def _mark_owned_project(self, connection, project_id, workspace):
+        from production.ownership_guard import GuardConflict, mark_authenticated
+        if self.projects_dir is None:
+            raise ContractViolation("Owned creation requires a trusted project root", "dependency_unavailable")
+        binding = str(connection.execute("SELECT binding_id FROM identity_binding WHERE singleton").fetchone()["binding_id"])
+        try:
+            mark_authenticated(self.projects_dir, binding=binding)
+            mark_authenticated(self.projects_dir / project_id, binding=binding, workspace=workspace.model_dump())
+        except (GuardConflict, OSError):
+            raise ContractViolation("Owned protection could not be established", "file_conflict") from None
+
+    def _audit(self, connection, actor, operation, target, result, *, operation_id=None):
+        if actor is None:
+            return
+        entry = AuditEntry(operation_id=operation_id or target, actor=actor, operation=operation,
+                           target=target, result=result, created_at=_now())
+        connection.execute("INSERT INTO identity_audit(operation_id,workspace_kind,owner_id,record) VALUES (%s,%s,%s,%s)",
+                           (entry.operation_id, actor.workspace.kind, actor.workspace.owner_id, _json(entry)))
+
+    def create_task(self, request: TaskCreate, snapshot: ConfigSnapshot, idempotency_key: str, *, workspace=None, actor=None):
+        workspace, actor = self._acceptance(workspace, actor)
+        scope = self._scope("create", "", actor)
         fingerprint = canonical_sha256({"request": request.model_dump(mode="json"), "snapshot": snapshot.model_dump(mode="json")})
         with self._connection() as connection:
-            replay = self._replay(connection, "create", idempotency_key, fingerprint)
+            replay = self._replay(connection, scope, idempotency_key, fingerprint)
             if replay is not None:
                 return TaskRecord.model_validate(replay)
             suffix = uuid4().hex
+            self._remember_actor(connection, actor)
             task = TaskRecord(
                 task_id="task-" + suffix, project_id="studio-" + suffix, run_id="run-" + uuid4().hex,
                 request=request, config_snapshot=snapshot,
                 cost=CostSnapshot(budget_usd_micros=request.budget_usd_micros, price_status=snapshot.price_status),
                 created_at=_now(), updated_at=_now(),
+                ownership=ResourceOwnership(workspace=workspace, creator=actor.identity) if actor else None, actor=actor,
             )
+            if workspace:
+                self._mark_owned_project(connection, task.project_id, workspace)
             connection.execute("INSERT INTO tasks(task_id,project_id,run_id,version,state,record) VALUES (%s,%s,%s,%s,%s,%s)", (task.task_id, task.project_id, task.run_id, task.version, task.state.value, _json(task)))
+            connection.execute("UPDATE tasks SET workspace_kind=%s,owner_id=%s WHERE task_id=%s",
+                               (workspace.kind if workspace else None, workspace.owner_id if workspace else None, task.task_id))
+            connection.execute("INSERT INTO project_owners VALUES (%s,%s,%s,%s)",
+                               (task.project_id, workspace.kind if workspace else None, workspace.owner_id if workspace else None,
+                                _json(task.ownership) if workspace else None))
             session = SessionReference(path=f"{task.task_id}/{task.run_id}/session.jsonl")
             connection.execute("INSERT INTO runs(run_id,task_id,project_id,session) VALUES (%s,%s,%s,%s)", (task.run_id, task.task_id, task.project_id, _json(session)))
-            connection.execute("INSERT INTO requests VALUES (%s,%s,%s,%s)", ("create", idempotency_key, fingerprint, _json(task)))
-            self._insert_command(connection, TaskCommand(command_id="cmd-" + uuid4().hex, task_id=task.task_id, run_id=task.run_id, kind="start", expected_version=task.version, idempotency_key="start-" + suffix))
+            connection.execute("INSERT INTO requests VALUES (%s,%s,%s,%s)", (scope, idempotency_key, fingerprint, _json(task)))
+            self._insert_command(connection, TaskCommand(command_id="cmd-" + uuid4().hex, task_id=task.task_id, run_id=task.run_id, kind="start", expected_version=task.version, idempotency_key="start-" + suffix, ownership=task.ownership, actor=actor))
             self._event(connection, task, "state", {"state": task.state.value})
+            self._audit(connection, actor, "create", task.task_id, "accepted")
             return task
 
     def get_task(self, task_id: str):
         with self._connection() as connection:
             return self._task(connection, task_id)
+
+    def get_task_for_workspace(self, task_id, workspace):
+        workspace = WorkspaceContext.model_validate(workspace)
+        with self._connection() as connection:
+            row = connection.execute("SELECT record FROM tasks WHERE task_id=%s AND workspace_kind=%s AND owner_id=%s",
+                                     (task_id, workspace.kind, workspace.owner_id)).fetchone()
+            if row is None:
+                raise ContractViolation("Task not found", "not_found")
+            return TaskRecord.model_validate(row["record"])
 
     def list_tasks(self, *, limit=50, after=None):
         if not 1 <= limit <= 200:
@@ -120,34 +209,87 @@ class PostgresRepository:
             rows = connection.execute("SELECT record FROM tasks WHERE (%s::text IS NULL OR task_id > %s) ORDER BY task_id LIMIT %s", (after, after, limit))
             return [TaskRecord.model_validate(row["record"]) for row in rows]
 
+    def list_tasks_for_workspace(self, workspace, *, limit=50, after=None):
+        workspace = WorkspaceContext.model_validate(workspace)
+        if not 1 <= limit <= 100:
+            raise ContractViolation("Invalid task page size")
+        with self._connection() as connection:
+            if after is not None and connection.execute("SELECT 1 FROM tasks WHERE task_id=%s AND workspace_kind=%s AND owner_id=%s",
+                                                       (after, workspace.kind, workspace.owner_id)).fetchone() is None:
+                raise ContractViolation("Task not found", "not_found")
+            rows = connection.execute("SELECT record FROM tasks WHERE workspace_kind=%s AND owner_id=%s AND (%s::text IS NULL OR task_id>%s) ORDER BY task_id LIMIT %s",
+                                      (workspace.kind, workspace.owner_id, after, after, limit))
+            return [TaskRecord.model_validate(row["record"]) for row in rows]
+
+    def project_ownership(self, project_id, workspace):
+        workspace = WorkspaceContext.model_validate(workspace)
+        with self._connection() as connection:
+            row = connection.execute("SELECT ownership FROM project_owners WHERE project_id=%s AND workspace_kind=%s AND owner_id=%s",
+                                     (project_id, workspace.kind, workspace.owner_id)).fetchone()
+            if row is None:
+                raise ContractViolation("Project not found", "not_found")
+            return ResourceOwnership.model_validate(row["ownership"])
+
+    def project_ids_for_workspace(self, workspace):
+        workspace = WorkspaceContext.model_validate(workspace)
+        with self._connection() as connection:
+            return [row["project_id"] for row in connection.execute("SELECT project_id FROM project_owners WHERE workspace_kind=%s AND owner_id=%s ORDER BY project_id", (workspace.kind, workspace.owner_id))]
+
+    def audit_for_workspace(self, workspace, *, operation_id):
+        workspace = WorkspaceContext.model_validate(workspace)
+        with self._connection() as connection:
+            return [AuditEntry.model_validate(row["record"]) for row in connection.execute("SELECT record FROM identity_audit WHERE workspace_kind=%s AND owner_id=%s AND operation_id=%s ORDER BY sequence", (workspace.kind, workspace.owner_id, operation_id))]
+
     def _insert_command(self, connection, command, *, fingerprint=None):
-        content = command.model_dump(mode="json", exclude={"command_id", "idempotency_key", "status"})
+        scope = self._scope(command.kind, command.task_id, command.actor) if command.actor else ""
+        content = command.model_dump(mode="json", exclude={"command_id", "idempotency_key", "status", "ownership", "actor"})
         fingerprint = fingerprint or canonical_sha256(content)
-        row = connection.execute("SELECT * FROM commands WHERE task_id=%s AND (idempotency_key=%s OR (run_id=%s AND kind=%s AND expected_version=%s))", (command.task_id, command.idempotency_key, command.run_id, command.kind, command.expected_version)).fetchone()
+        row = connection.execute("SELECT * FROM commands WHERE task_id=%s AND ((request_scope=%s AND idempotency_key=%s) OR (run_id=%s AND kind=%s AND expected_version=%s))", (command.task_id, scope, command.idempotency_key, command.run_id, command.kind, command.expected_version)).fetchone()
         if row:
+            if row["request_scope"] != scope:
+                raise ContractViolation("A command is already accepted for this version", "version_conflict")
             if row["fingerprint"] != fingerprint:
                 raise ContractViolation("Conflicting command idempotency key", "idempotency_conflict")
             return self._command(row)
-        connection.execute("INSERT INTO commands(command_id,task_id,run_id,kind,expected_version,idempotency_key,payload,status,fingerprint) VALUES (%s,%s,%s,%s,%s,%s,%s,'pending',%s)", (command.command_id, command.task_id, command.run_id, command.kind, command.expected_version, command.idempotency_key, _json(command.payload), fingerprint))
+        connection.execute("INSERT INTO commands(command_id,task_id,run_id,kind,expected_version,idempotency_key,payload,status,fingerprint,ownership,actor,request_scope) VALUES (%s,%s,%s,%s,%s,%s,%s,'pending',%s,%s,%s,%s)", (command.command_id, command.task_id, command.run_id, command.kind, command.expected_version, command.idempotency_key, _json(command.payload), fingerprint, _json(command.ownership) if command.ownership else None, _json(command.actor) if command.actor else None, scope))
         return command.model_copy(update={"status": "pending"})
 
     @staticmethod
     def _command(row):
         return TaskCommand.model_validate({key: row[key] for key in TaskCommand.model_fields})
 
-    def enqueue_command(self, command):
+    def _accepted_task(self, connection, task_id, workspace, actor):
+        if actor:
+            row = connection.execute("SELECT record FROM tasks WHERE task_id=%s AND workspace_kind=%s AND owner_id=%s FOR UPDATE",
+                                     (task_id, workspace.kind, workspace.owner_id)).fetchone()
+            if row is None:
+                raise ContractViolation("Task not found", "not_found")
+            return TaskRecord.model_validate(row["record"])
+        task = self._task(connection, task_id, lock=True)
+        if task.ownership:
+            raise ContractViolation("Owned operations require workspace and actor", "forbidden")
+        return task
+
+    def enqueue_command(self, command, *, workspace=None, actor=None):
+        workspace, actor = self._acceptance(workspace, actor)
+        scope = self._scope(command.kind, command.task_id, actor) if actor else ""
         with self._connection() as connection:
-            task = self._task(connection, command.task_id, lock=True)
+            task = self._accepted_task(connection, command.task_id, workspace, actor)
+            if command.actor and (command.actor != actor or command.ownership != task.ownership):
+                raise ContractViolation("Command identity differs from accepted context", "forbidden")
+            command = command.model_copy(update={"actor": actor, "ownership": task.ownership})
             if task.run_id != command.run_id:
                 raise ContractViolation("Command run changed", "state_conflict")
-            existing = connection.execute("SELECT * FROM commands WHERE task_id=%s AND idempotency_key=%s", (command.task_id, command.idempotency_key)).fetchone()
-            fingerprint = canonical_sha256(command.model_dump(mode="json", exclude={"command_id", "idempotency_key", "status"}))
+            existing = connection.execute("SELECT * FROM commands WHERE task_id=%s AND request_scope=%s AND idempotency_key=%s", (command.task_id, scope, command.idempotency_key)).fetchone()
+            fingerprint = canonical_sha256(command.model_dump(mode="json", exclude={"command_id", "idempotency_key", "status", "ownership", "actor"}))
             if existing:
                 if existing["fingerprint"] != fingerprint:
                     raise ContractViolation("Conflicting command idempotency key", "idempotency_conflict")
                 return self._command(existing)
             if task.version != command.expected_version:
                 raise ContractViolation("Task version changed", "version_conflict")
+            self._remember_actor(connection, actor)
+            task = task.model_copy(update={"actor": actor})
             if command.kind in {"cancel", "resume"}:
                 if command.kind == "resume":
                     if connection.execute("SELECT 1 FROM calls WHERE task_id=%s AND status IN ('prepared','submitted','outcome_unknown') AND (record->>'external_job_id') IS NULL LIMIT 1", (task.task_id,)).fetchone():
@@ -159,11 +301,13 @@ class PostgresRepository:
                 if command.kind == "cancel":
                     connection.execute("UPDATE commands SET status='failed' WHERE task_id=%s AND status='pending'", (task.task_id,))
                 command = command.model_copy(update={"expected_version": task.version})
-            return self._insert_command(connection, command, fingerprint=fingerprint)
+            accepted = self._insert_command(connection, command, fingerprint=fingerprint)
+            self._audit(connection, actor, command.kind, task.task_id, "accepted", operation_id=accepted.command_id)
+            return accepted
 
     def _context(self, connection, task, run=None):
         run = run or connection.execute("SELECT * FROM runs WHERE run_id=%s", (task.run_id,)).fetchone()
-        return RunContext(task_id=task.task_id, project_id=task.project_id, run_id=task.run_id, attempt=run["attempt"], fence=run["fence"], config_snapshot=task.config_snapshot, session=SessionReference.model_validate(run["session"]))
+        return RunContext(task_id=task.task_id, project_id=task.project_id, run_id=task.run_id, attempt=run["attempt"], fence=run["fence"], config_snapshot=task.config_snapshot, session=SessionReference.model_validate(run["session"]), ownership=task.ownership, actor=Actor.model_validate(run["actor"]) if run["actor"] else None)
 
     def _assert_fence(self, connection, task, fence):
         row = connection.execute("SELECT * FROM runs WHERE run_id=%s AND task_id=%s AND project_id=%s AND fence=%s AND lease_worker IS NOT NULL AND lease_expires_at>clock_timestamp() AND active FOR UPDATE", (task.run_id, task.task_id, task.project_id, fence)).fetchone()
@@ -176,7 +320,9 @@ class PostgresRepository:
             task = self._task(connection, context.task_id, lock=True)
             if (task.run_id, task.project_id, task.config_snapshot) != (context.run_id, context.project_id, context.config_snapshot):
                 raise ContractViolation("Worker fence context changed", "fence_conflict")
-            self._assert_fence(connection, task, context.fence)
+            run = self._assert_fence(connection, task, context.fence)
+            if context.ownership != task.ownership or context.actor != (Actor.model_validate(run["actor"]) if run["actor"] else None):
+                raise ContractViolation("Worker identity context changed", "fence_conflict")
 
     def claim_command(self, worker_id, *, lease_seconds=30):
         if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,79}", worker_id) or not 1 <= lease_seconds <= 3600:
@@ -190,7 +336,7 @@ class PostgresRepository:
             if row is None:
                 return None
             task = self._task(connection, row["task_id"], lock=True)
-            run = connection.execute("UPDATE runs SET fence=fence+1, lease_worker=%s, lease_expires_at=clock_timestamp()+(%s * interval '1 second') WHERE run_id=%s AND lease_worker IS NULL AND active RETURNING *", (worker_id, lease_seconds, task.run_id)).fetchone()
+            run = connection.execute("UPDATE runs SET fence=fence+1, actor=%s, lease_worker=%s, lease_expires_at=clock_timestamp()+(%s * interval '1 second') WHERE run_id=%s AND lease_worker IS NULL AND active RETURNING *", (_json(row["actor"]) if row["actor"] else None, worker_id, lease_seconds, task.run_id)).fetchone()
             if run is None:
                 return None
             connection.execute("UPDATE commands SET status='claimed' WHERE command_id=%s", (row["command_id"],))
@@ -229,7 +375,7 @@ class PostgresRepository:
         updates = dict(updates or {})
         if updates.keys() - {"current_stage", "approval", "error", "result"}:
             raise ContractViolation("Task updates contain immutable fields")
-        data = task.model_dump(mode="json")
+        data = task.model_dump(mode="json", context={"persistence": True})
         data.update(updates, state=state, version=task.version + 1, updated_at=_now())
         previous_state = task.state
         task = TaskRecord.model_validate(data)
@@ -294,14 +440,16 @@ class PostgresRepository:
             self._event(connection, task, "approval", request.model_dump(mode="json"))
             return task
 
-    def decide_gate(self, decision, *, idempotency_key, validate_evidence=None):
+    def decide_gate(self, decision, *, idempotency_key, workspace=None, actor=None, validate_evidence=None):
+        workspace, actor = self._acceptance(workspace, actor)
         task_id = decision.binding.task_id
+        scope = self._scope("decision", task_id + ":" + decision.binding.gate_id, actor) if actor else "decision:" + task_id
         fingerprint = canonical_sha256(decision)
         with self._connection() as connection:
-            replay = self._replay(connection, "decision:" + task_id, idempotency_key, fingerprint)
+            task = self._accepted_task(connection, task_id, workspace, actor)
+            replay = self._replay(connection, scope, idempotency_key, fingerprint)
             if replay is not None:
                 return TaskRecord.model_validate(replay)
-            task = self._task(connection, task_id, lock=True)
             if task.approval is None or task.state != TaskState.AWAITING_APPROVAL:
                 raise ContractViolation("No pending approval", "approval_conflict")
             check_approval(decision, task.approval.binding, current_version=task.version)
@@ -313,7 +461,9 @@ class PostgresRepository:
             if row is None or row["status"] != "pending" or row["consumed"]:
                 raise ContractViolation("Approval already consumed", "approval_conflict")
             status = {"approve": "approved", "revise": "revised", "reject": "rejected", "abort": "aborted"}[decision.decision]
-            connection.execute("UPDATE gates SET status=%s,decision=%s,consumed=true WHERE task_id=%s AND run_id=%s AND gate_id=%s", (status, _json(decision), task_id, task.run_id, decision.binding.gate_id))
+            self._remember_actor(connection, actor)
+            task = task.model_copy(update={"actor": actor})
+            connection.execute("UPDATE gates SET status=%s,decision=%s,decision_actor=%s,consumed=true WHERE task_id=%s AND run_id=%s AND gate_id=%s", (status, _json(decision), _json(actor) if actor else None, task_id, task.run_id, decision.binding.gate_id))
             approval = task.approval.model_copy(update={"status": status})
             updates = {"approval": approval.model_dump(mode="json")}
             if decision.decision == "reject":
@@ -324,9 +474,11 @@ class PostgresRepository:
             task = self._change(connection, task, target, updates)
             if decision.decision != "reject":
                 kind = "continue" if decision.decision == "approve" else "revise" if decision.decision == "revise" else "cancel"
-                self._insert_command(connection, TaskCommand(command_id="cmd-" + uuid4().hex, task_id=task_id, run_id=task.run_id, kind=kind, expected_version=task.version, idempotency_key=idempotency_key, payload={"gate_id": decision.binding.gate_id, "decision": decision.model_dump(mode="json")}))
+                command_key = canonical_sha256({"decision_scope": scope, "key": idempotency_key}) if actor else idempotency_key
+                self._insert_command(connection, TaskCommand(command_id="cmd-" + uuid4().hex, task_id=task_id, run_id=task.run_id, kind=kind, expected_version=task.version, idempotency_key=command_key, payload={"gate_id": decision.binding.gate_id, "decision": decision.model_dump(mode="json")}, ownership=task.ownership, actor=actor))
             self._event(connection, task, "approval", {"gate_id": decision.binding.gate_id, "status": status})
-            connection.execute("INSERT INTO requests VALUES (%s,%s,%s,%s)", ("decision:" + task_id, idempotency_key, fingerprint, _json(task)))
+            connection.execute("INSERT INTO requests VALUES (%s,%s,%s,%s)", (scope, idempotency_key, fingerprint, _json(task)))
+            self._audit(connection, actor, "decision", task_id, status)
             return task
 
     def approved_gate(self, task_id, gate_id):
@@ -497,7 +649,7 @@ class PostgresRepository:
                     call = CallIntent.model_validate(record["record"]).model_copy(update={"status": "outcome_unknown", "actual_usd_micros": None})
                     connection.execute("UPDATE calls SET record=%s,status='outcome_unknown',actual_usd_micros=NULL WHERE call_id=%s", (_json(call), call.call_id))
                 # Recovery can override any lifecycle state after a writer died.
-                data = task.model_dump(mode="json")
+                data = task.model_dump(mode="json", context={"persistence": True})
                 data.update(state=TaskState.RECOVERY_REQUIRED, version=task.version + 1, updated_at=_now(), error=ErrorDTO(code="outcome_unknown", message="Worker lease expired; confirm process exit and reconcile persisted intents", recovery_actions=["reconcile", "cancel"]).model_dump(mode="json"))
                 task = TaskRecord.model_validate(data)
                 self._save_task(connection, task)

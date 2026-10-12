@@ -7,6 +7,8 @@ on disk; these DTOs hold references rather than introducing a second workflow.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Mapping
+from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from hashlib import sha256
 import json
@@ -22,6 +24,107 @@ Sha256 = Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
 
 class ContractModel(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+
+class WorkspaceContext(ContractModel):
+    kind: Literal["personal", "organization"]
+    owner_id: str = Field(min_length=1, max_length=256)
+
+    @property
+    def key(self) -> str:
+        return f"{self.kind}:{self.owner_id}"
+
+
+class UserIdentity(ContractModel):
+    user_id: str = Field(min_length=1, max_length=256)
+    issuer: str = Field(min_length=1, max_length=2000)
+    sub: str = Field(min_length=1, max_length=256)
+
+
+class Actor(ContractModel):
+    identity: UserIdentity
+    workspace: WorkspaceContext
+
+    @model_validator(mode="after")
+    def personal_owner_matches_identity(self):
+        if self.workspace.kind == "personal" and self.workspace.owner_id != self.identity.user_id:
+            raise ValueError("Personal workspace must belong to the actor")
+        return self
+
+
+class ResourceOwnership(ContractModel):
+    workspace: WorkspaceContext
+    creator: UserIdentity
+
+
+class OwnedRecord(ContractModel):
+    ownership: ResourceOwnership | None = None
+    actor: Actor | None = None
+
+    @model_validator(mode="after")
+    def ownership_matches_actor(self):
+        if (self.ownership is None) != (self.actor is None):
+            raise ValueError("Ownership and actor must be present together")
+        if self.actor and self.actor.workspace != self.ownership.workspace:
+            raise ValueError("Actor workspace differs from ownership")
+        return self
+
+
+class AuditEntry(ContractModel):
+    operation_id: str
+    actor: Actor
+    operation: str
+    target: str
+    result: str
+    created_at: str
+
+
+class AuthContext(ContractModel):
+    identity: UserIdentity
+    workspace: WorkspaceContext
+    role: Literal["admin", "editor", "viewer", "personal"] | None
+    permissions: list[str]
+    context_id: str
+    session_ref: Sha256
+    authority_verified_at: datetime
+
+
+class AuthSession(ContractModel):
+    session_ref: Sha256
+    identity: UserIdentity
+    workspace: WorkspaceContext
+    context_id: str
+    csrf_hash: Sha256
+    created_at: datetime
+    absolute_expires_at: datetime
+    idle_expires_at: datetime
+    revision: Version
+    authority_verified_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class StoredSession:
+    metadata: AuthSession
+    sdk_storage: dict[str, str | None] = field(repr=False)
+    csrf_token: str = field(repr=False)
+
+
+@dataclass(frozen=True)
+class SessionHandle:
+    cookie: str = field(repr=False)
+    session: StoredSession
+
+
+@dataclass(frozen=True, repr=False)
+class ConsumedLoginInteraction:
+    reference: str
+    completion_token: str
+    state: str
+    nonce: str
+    code_verifier: str
+    return_to: str
+    organization_hint: str | None
+    sdk_storage: dict[str, str | None]
 
 
 def canonical_sha256(value: ContractModel | dict) -> str:
@@ -220,10 +323,113 @@ class ErrorDTO(ContractModel):
         "fence_conflict", "budget_exceeded", "quote_required", "outcome_unknown",
         "file_conflict", "invalid_artifact", "cursor_expired", "forbidden", "rpc_error",
         "timeout", "internal_error",
+        "unauthenticated", "csrf_invalid", "auth_context_conflict", "invitation_invalid",
+        "last_admin", "invalid_cursor", "identity_unavailable",
     ]
     message: str = Field(min_length=1, max_length=4000)
     retryable: bool = False
     recovery_actions: list[Literal["refresh", "resume", "reconcile", "cancel", "configure"]] = Field(default_factory=list)
+
+
+OrganizationRole = Literal["admin", "editor", "viewer"]
+OrganizationOperation = Literal["organization:create", "invitation:create", "invitation:cancel", "invitation:accept", "member:role", "member:remove"]
+
+
+class OrganizationDTO(ContractModel):
+    organization_id: str = Field(min_length=1, max_length=256)
+    name: str = Field(min_length=1, max_length=100)
+    roles: list[OrganizationRole]
+
+
+class MemberDTO(ContractModel):
+    user_id: str = Field(min_length=1, max_length=256)
+    name: str | None = Field(default=None, max_length=200)
+    email: str | None = Field(default=None, max_length=320)
+    roles: list[OrganizationRole]
+
+
+class InvitationDTO(ContractModel):
+    invitation_id: str = Field(min_length=1, max_length=256)
+    organization_id: str = Field(min_length=1, max_length=256)
+    email: str = Field(min_length=1, max_length=320)
+    role: OrganizationRole
+    status: Literal["pending", "accepted", "cancelled", "expired"] = "pending"
+    expires_at: datetime
+
+    @model_validator(mode="after")
+    def expiry_is_utc_aware(self):
+        if self.expires_at.tzinfo is None:
+            raise ValueError("Invitation expiry needs a UTC timestamp")
+        return self
+
+
+class InvitationRecord(InvitationDTO):
+    ticket_hash: Sha256
+    intended_user_id: str | None = None
+    issued_by: Actor
+
+    def public_dict(self):
+        return self.model_dump(mode="json", exclude={"ticket_hash", "intended_user_id", "issued_by"})
+
+
+class InvitationTransition(ContractModel):
+    invitation_id: str = Field(min_length=1, max_length=256)
+    status: Literal["accepted", "cancelled"]
+
+
+class OperationScope(ContractModel):
+    actor: Actor
+    operation: OrganizationOperation
+    resource_id: str = Field(min_length=1, max_length=1024)
+    idempotency_key: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class OrganizationOperationTarget(ContractModel):
+    organization_id: str | None = Field(default=None, min_length=1, max_length=256)
+    user_id: str | None = Field(default=None, min_length=1, max_length=256)
+    invitation_id: str | None = Field(default=None, min_length=1, max_length=256)
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    email: str | None = Field(default=None, min_length=1, max_length=320)
+    role: OrganizationRole | None = None
+
+
+class OrganizationOperationResult(ContractModel):
+    status_code: Literal[200, 201, 204, 409, 422, 503]
+    body: OrganizationDTO | MemberDTO | InvitationDTO | ErrorDTO | None = None
+
+    @model_validator(mode="after")
+    def status_matches_body(self):
+        if (self.status_code >= 400) != isinstance(self.body, ErrorDTO):
+            raise ValueError("Result status differs from response body")
+        if (self.status_code == 204) != (self.body is None):
+            raise ValueError("Only 204 results have no body")
+        return self
+
+
+class SafeRemoteRefs(ContractModel):
+    organization_id: str | None = Field(default=None, min_length=1, max_length=256)
+    invitation_id: str | None = Field(default=None, min_length=1, max_length=256)
+    user_id: str | None = Field(default=None, min_length=1, max_length=256)
+
+
+class OrganizationIntent(ContractModel):
+    operation_id: Identifier
+    scope: OperationScope
+    request_sha256: Sha256
+    target: OrganizationOperationTarget
+    organization_id: str | None = None
+    stage: Identifier = "prepared"
+    status: Literal["prepared", "submitted", "recovery_required", "committed", "failed"] = "prepared"
+    revision: Version = 1
+    remote_refs: SafeRemoteRefs = Field(default_factory=SafeRemoteRefs)
+    result: OrganizationOperationResult | None = None
+    created_at: str
+    updated_at: str
+
+
+class IntentAcceptance(ContractModel):
+    intent: OrganizationIntent
+    disposition: Literal["new", "pending", "replay"]
 
 
 class CostSnapshot(ContractModel):
@@ -245,7 +451,7 @@ class RenderResult(ContractModel):
     verified: Literal[True]
 
 
-class TaskRecord(ContractModel):
+class TaskFields(ContractModel):
     task_id: Identifier
     project_id: Identifier
     run_id: Identifier
@@ -270,6 +476,47 @@ class TaskRecord(ContractModel):
         return self
 
 
+class PublicUserReference(ContractModel):
+    user_id: str = Field(min_length=1, max_length=256)
+
+
+class PublicResourceOwnership(ContractModel):
+    workspace: WorkspaceContext
+    creator: PublicUserReference
+
+
+class PublicActor(PublicUserReference):
+    workspace: WorkspaceContext
+
+
+class PublicTaskRecord(TaskFields):
+    ownership: PublicResourceOwnership | None = None
+    actor: PublicActor | None = None
+
+    @model_validator(mode="after")
+    def public_ownership_matches_actor(self):
+        if self.actor and (self.ownership is None or self.actor.workspace != self.ownership.workspace):
+            raise ValueError("Public ownership and actor must match")
+        return self
+
+
+class TaskRecord(OwnedRecord, TaskFields):
+    @model_validator(mode="after")
+    def ownership_matches_actor(self):
+        # Historical imports have a mapped creator without fabricating an old actor.
+        if self.actor and (self.ownership is None or self.actor.workspace != self.ownership.workspace):
+            raise ValueError("Actor workspace differs from ownership")
+        return self
+
+    def public_dict(self) -> dict:
+        value = self.model_dump(mode="json")
+        if self.ownership:
+            value["ownership"]["creator"] = {"user_id": self.ownership.creator.user_id}
+        if self.actor:
+            value["actor"] = {"user_id": self.actor.identity.user_id, "workspace": self.actor.workspace.model_dump()}
+        return PublicTaskRecord.model_validate(value).model_dump(mode="json")
+
+
 class SessionReference(ContractModel):
     """Internal reference under .runtime/studio/sessions, never projects or public API."""
 
@@ -277,7 +524,7 @@ class SessionReference(ContractModel):
     session_id: str | None = None
 
 
-class RunContext(ContractModel):
+class RunContext(OwnedRecord):
     task_id: Identifier
     project_id: Identifier
     run_id: Identifier
@@ -287,7 +534,7 @@ class RunContext(ContractModel):
     session: SessionReference
 
 
-class TaskCommand(ContractModel):
+class TaskCommand(OwnedRecord):
     command_id: Identifier
     task_id: Identifier
     run_id: Identifier
@@ -373,10 +620,17 @@ class Repository(Protocol):
     Repeating an idempotency key with a different fingerprint is a conflict.
     """
 
-    def create_task(self, request: TaskCreate, snapshot: ConfigSnapshot, idempotency_key: str) -> TaskRecord: ...
+    def create_task(self, request: TaskCreate, snapshot: ConfigSnapshot, idempotency_key: str, *, workspace: WorkspaceContext | None = None, actor: Actor | None = None) -> TaskRecord: ...
     def get_task(self, task_id: str) -> TaskRecord: ...
+    def get_task_for_workspace(self, task_id: str, workspace: WorkspaceContext) -> TaskRecord: ...
+    def list_tasks_for_workspace(self, workspace: WorkspaceContext, *, limit: int = 50, after: str | None = None) -> list[TaskRecord]: ...
+    def project_ownership(self, project_id: str, workspace: WorkspaceContext) -> ResourceOwnership: ...
+    def project_ids_for_workspace(self, workspace: WorkspaceContext) -> list[str]: ...
+    def audit_for_workspace(self, workspace: WorkspaceContext, *, operation_id: str) -> list[AuditEntry]: ...
+    def database_binding(self) -> str: ...
+    def assert_legacy_root(self, *, expected_binding: str) -> None: ...
     def list_tasks(self, *, limit: int = 50, after: str | None = None) -> list[TaskRecord]: ...
-    def enqueue_command(self, command: TaskCommand) -> TaskCommand: ...
+    def enqueue_command(self, command: TaskCommand, *, workspace: WorkspaceContext | None = None, actor: Actor | None = None) -> TaskCommand: ...
     def claim_command(self, worker_id: str, *, lease_seconds: int = 30) -> ClaimedCommand | None: ...
     def heartbeat(self, claim: ClaimedCommand, *, lease_seconds: int = 30) -> ClaimedCommand: ...
     def finish_command(self, claim: ClaimedCommand, *, error: ErrorDTO | None = None) -> None: ...
@@ -390,7 +644,7 @@ class Repository(Protocol):
     def append_event(self, event: StudioEvent, *, fence: int | None = None) -> StudioEvent: ...
     def events(self, task_id: str, *, after: int = 0, limit: int = 100) -> list[StudioEvent]: ...
     def put_gate(self, request: ApprovalRequest, *, expected_version: int, fence: int) -> TaskRecord: ...
-    def decide_gate(self, decision: ApprovalDecision, *, idempotency_key: str, validate_evidence=None) -> TaskRecord: ...
+    def decide_gate(self, decision: ApprovalDecision, *, idempotency_key: str, workspace: WorkspaceContext | None = None, actor: Actor | None = None, validate_evidence=None) -> TaskRecord: ...
     def approved_gate(self, task_id: str, gate_id: str) -> ApprovalRequest | None: ...
     def pending_cancel(self, task_id: str) -> TaskCommand | None: ...
     def reserve_call(self, intent: CallIntent) -> CallIntent: ...
@@ -398,6 +652,41 @@ class Repository(Protocol):
     def update_call(self, intent: CallIntent) -> CallIntent: ...
     def record_file_intent(self, intent: FileWriteIntent) -> FileWriteIntent: ...
     def unresolved_intents(self, task_id: str) -> list[CallIntent | FileWriteIntent]: ...
+
+
+class PersistentStorage(Protocol):
+    def get(self, key: str) -> str | None: ...
+    def set(self, key: str, value: str | None) -> None: ...
+    def delete(self, key: str) -> None: ...
+
+
+class IdentityStore(Protocol):
+    """Private synchronous state; consumers verify current Logto authority first."""
+
+    def resolve_user(self, issuer: str, sub: str) -> UserIdentity: ...
+    def get_user(self, user_id: str) -> UserIdentity: ...
+    def remember_verified_organization(self, organization_id: str, name: str) -> None: ...
+    def create_session(self, identity: UserIdentity, workspace: WorkspaceContext, *, sdk_storage: dict[str, str | None], absolute_seconds: int = 86400, idle_seconds: int = 28800) -> SessionHandle: ...
+    def get_session(self, cookie: str) -> StoredSession | None: ...
+    def touch_session(self, cookie: str) -> StoredSession: ...
+    def update_session(self, cookie: str, *, expected_revision: int, sdk_storage: dict[str, str | None]) -> StoredSession: ...
+    def rotate_session(self, cookie: str, *, expected_revision: int, workspace: WorkspaceContext) -> SessionHandle: ...
+    def revoke_session(self, cookie: str, *, expected_revision: int | None = None) -> None: ...
+    def revoke_user_sessions(self, user_id: str) -> int: ...
+    def invalidate_authority(self, user_ids: list[str], workspace: WorkspaceContext) -> int: ...
+    def record_authority_verification(self, cookie: str, *, expected_revision: int, verified_at: datetime) -> StoredSession: ...
+    def validate_context(self, cookie: str, csrf_token: str, context_id: str) -> StoredSession: ...
+    def storage(self, cookie: str) -> PersistentStorage: ...
+    def create_login_interaction(self, binding_cookie: str, *, state: str, nonce: str, code_verifier: str, return_to: str, organization_hint: str | None, sdk_storage: dict[str, str | None], previous_session_cookie: str | None = None, lifetime_seconds: int = 600) -> str: ...
+    def consume_login_interaction(self, binding_cookie: str, state: str) -> ConsumedLoginInteraction: ...
+    def complete_login(self, interaction: ConsumedLoginInteraction, identity: UserIdentity, workspace: WorkspaceContext, *, sdk_storage: dict[str, str | None], absolute_seconds: int = 86400, idle_seconds: int = 28800) -> SessionHandle: ...
+    def begin_organization_intent(self, scope: OperationScope, *, request_sha256: str, target: OrganizationOperationTarget) -> IntentAcceptance: ...
+    def get_organization_intent(self, scope: OperationScope) -> OrganizationIntent | None: ...
+    def advance_organization_intent(self, scope: OperationScope, *, expected_revision: int, stage: str, status: str, remote_refs: SafeRemoteRefs | None = None) -> OrganizationIntent: ...
+    def complete_organization_intent(self, scope: OperationScope, *, expected_revision: int, result: OrganizationOperationResult, affected_user_ids=(), invitation_transition: InvitationTransition | None = None) -> OrganizationIntent: ...
+    def reject_prepared_organization_intent(self, scope: OperationScope, *, expected_revision: int, result: OrganizationOperationResult) -> OrganizationIntent: ...
+    def store_invitation(self, scope: OperationScope, *, expected_revision: int, invitation: InvitationDTO, ticket: str, intended_user_id: str | None = None) -> InvitationRecord: ...
+    def invitation_for_ticket(self, ticket: str) -> InvitationRecord: ...
 
 
 class PiRunner(Protocol):
@@ -436,6 +725,19 @@ API_CONTRACT = {
 SCHEMA_MODELS = {
     "task_create": TaskCreate,
     "task_record": TaskRecord,
+    "public_task_record": PublicTaskRecord,
+    "user_identity": UserIdentity,
+    "workspace": WorkspaceContext,
+    "ownership": ResourceOwnership,
+    "actor": Actor,
+    "auth_context": AuthContext,
+    "auth_session": AuthSession,
+    "organization": OrganizationDTO,
+    "member": MemberDTO,
+    "invitation": InvitationDTO,
+    "operation_scope": OperationScope,
+    "organization_intent": OrganizationIntent,
+    "organization_result": OrganizationOperationResult,
     "config_snapshot": ConfigSnapshot,
     "approval_request": ApprovalRequest,
     "approval_decision": ApprovalDecision,

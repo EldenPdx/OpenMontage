@@ -21,7 +21,7 @@ def api():
     with isolated_repository() as repo:
         app = create_app(studio_repository=repo, studio_config=config,
                          studio_environment={"TEST_PI_KEY": "private-test-credential"})
-        with TestClient(app, base_url="http://127.0.0.1") as client:
+        with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 12345)) as client:
             config_response = client.get("/api/studio/config")
             assert config_response.status_code == 200
             headers = {"Origin": "http://127.0.0.1", "X-CSRF-Token": config_response.json()["csrf_token"],
@@ -166,7 +166,7 @@ def test_project_active_documents_cannot_execute_in_the_studio_origin(api, tmp_p
     project = projects / "legacy-project"
     project.mkdir(parents=True)
     (project / "preview.html").write_text("<script>fetch('/api/studio/config')</script>")
-    monkeypatch.setattr(backlot.server, "PROJECTS_DIR", projects)
+    monkeypatch.setattr(__import__("backlot.projects_api", fromlist=["PROJECTS_DIR"]), "PROJECTS_DIR", projects)
     response = client.get("/media/legacy-project/preview.html")
     assert response.status_code == 200
     assert "sandbox" in response.headers["content-security-policy"]

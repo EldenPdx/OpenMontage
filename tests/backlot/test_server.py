@@ -18,7 +18,8 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from backlot import server as server_mod
+from backlot import projects_api as server_mod
+from backlot import server as factory_mod
 from backlot import state as state_mod
 
 
@@ -40,7 +41,7 @@ def client(projects_root, monkeypatch):
         return None
 
     monkeypatch.setattr(server_mod, "_watch_projects", no_watch)
-    with TestClient(server_mod.create_app()) as c:
+    with TestClient(factory_mod.create_app(), base_url="http://127.0.0.1", client=("127.0.0.1", 12345)) as c:
         yield c
 
 
@@ -250,7 +251,7 @@ class TestBacklotPageRoutes:
         response = client.get("/ui", follow_redirects=False)
 
         assert response.status_code == 307
-        assert response.headers["location"] == "http://testserver/ui/"
+        assert response.headers["location"] == "http://127.0.0.1/ui/"
 
 
 class TestBacklotPerformanceBudgets:

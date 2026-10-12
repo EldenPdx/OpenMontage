@@ -15,12 +15,13 @@ from tests.fixtures.studio.repository import test_repository as isolated_reposit
 
 
 @contextmanager
-def serving(app):
+def serving(app, *, port=0):
     listener = socket.socket()
-    listener.bind(("127.0.0.1", 0))
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", port))
     listener.listen(128)
     port = listener.getsockname()[1]
-    server = uvicorn.Server(uvicorn.Config(app, log_level="error", lifespan="on"))
+    server = uvicorn.Server(uvicorn.Config(app, log_level="error", lifespan="on", proxy_headers=False, access_log=False))
     thread = threading.Thread(target=server.run, kwargs={"sockets": [listener]}, daemon=True)
     thread.start()
     deadline = time.monotonic() + 10
@@ -46,7 +47,7 @@ def studio_browser(repo, *, viewport=None, projects_dir=None):
     if projects_dir is not None:
         import backlot.server
         import backlot.state
-        patch.setattr(backlot.server, "PROJECTS_DIR", projects_dir)
+        patch.setattr(__import__("backlot.projects_api", fromlist=["PROJECTS_DIR"]), "PROJECTS_DIR", projects_dir)
         patch.setattr(backlot.state, "PROJECTS_DIR", projects_dir)
     app = create_app(studio_repository=repo, studio_config=config,
                      studio_environment={"BROWSER_MODEL_KEY": "private-browser-credential"})

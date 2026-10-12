@@ -55,7 +55,7 @@ async def test_first_real_pi_model_request_includes_verbatim_guide_and_selected_
         marker = json.loads((tmp_path / "projects" / task.project_id / "project.json").read_text())
         app = create_app(studio_repository=repository, studio_config=worker.config, studio_environment=worker.environment)
         app.state.studio_projects_dir = worker.projects_dir
-        with TestClient(app, base_url="http://127.0.0.1") as client:
+        with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 12345)) as client:
             token = client.get("/api/studio/config").json()["csrf_token"]
             response = client.post(f"/api/studio/tasks/{task.task_id}/resume",
                                    headers={"Origin": "http://127.0.0.1", "X-CSRF-Token": token, "Idempotency-Key": "bootstrap-resume-0001"},
@@ -100,7 +100,7 @@ async def test_backend_cost_approval_supplies_no_pipeline_checkpoint_and_preserv
         marker.symlink_to(tmp_path / "outside-project.json")
         app = create_app(studio_repository=repository, studio_config=worker.config, studio_environment=worker.environment)
         app.state.studio_projects_dir = worker.projects_dir
-        with TestClient(app, base_url="http://127.0.0.1") as client:
+        with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 12345)) as client:
             token = client.get("/api/studio/config").json()["csrf_token"]
             approved = client.post(f"/api/studio/tasks/{task.task_id}/approvals/{waiting.approval.binding.gate_id}/decision",
                                    headers={"Origin": "http://127.0.0.1", "X-CSRF-Token": token,
@@ -161,7 +161,7 @@ async def test_browser_approved_checkpoint_reaches_resumed_real_pi_without_rewri
         session_id = json.loads(session.read_text().splitlines()[0])["id"]
         app = create_app(studio_repository=repository, studio_config=worker.config, studio_environment=worker.environment)
         app.state.studio_projects_dir = worker.projects_dir
-        with TestClient(app, base_url="http://127.0.0.1") as client:
+        with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 12345)) as client:
             token = client.get("/api/studio/config").json()["csrf_token"]
             approved = client.post(f"/api/studio/tasks/{task.task_id}/approvals/{waiting.approval.binding.gate_id}/decision",
                                    headers={"Origin": "http://127.0.0.1", "X-CSRF-Token": token,
@@ -215,7 +215,7 @@ async def test_current_checkpoint_read_retains_owned_path_and_size_guards_before
             checkpoint.symlink_to(other)
         app = create_app(studio_repository=repository, studio_config=worker.config, studio_environment=worker.environment)
         app.state.studio_projects_dir = worker.projects_dir
-        with TestClient(app, base_url="http://127.0.0.1") as client:
+        with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 12345)) as client:
             token = client.get("/api/studio/config").json()["csrf_token"]
             response = client.post(f"/api/studio/tasks/{task.task_id}/resume",
                                    headers={"Origin": "http://127.0.0.1", "X-CSRF-Token": token,

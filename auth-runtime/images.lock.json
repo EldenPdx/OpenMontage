@@ -1,0 +1,6 @@
+{
+  "postgres": {"source": "public.ecr.aws/docker/library/postgres:17-alpine", "digest": "sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24", "version": "17.11"},
+  "logto": {"source": "ghcr.io/logto-io/logto:1.44.0", "digest": "sha256:847cdd2759ad60f61b9733af0ea352183c805681dff5c9f8140a80f52d8e1340", "version": "1.44.0"},
+  "keycloak": {"source": "quay.io/keycloak/keycloak:26.8.0", "digest": "sha256:27b3230fbabb8c9ff3c66c864cf09dcd8a41aca82e5100679d109ef0eeb05741", "version": "26.8.0"},
+  "mailpit": {"source": "ghcr.io/axllent/mailpit:v1.31.5", "digest": "sha256:94f6b70c1436defae6799d9ac7ff0eeff9540465b842026d5cdb018f1c0234ea", "version": "1.31.5"}
+}

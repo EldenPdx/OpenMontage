@@ -16,7 +16,10 @@ from production.contracts import (
 
 
 @pytest.fixture
-def repository_factory():
+def repository_factory(tmp_path):
+    dsn = os.environ.get("STUDIO_TEST_DATABASE_URL")
+    if os.environ.get("STUDIO_REQUIRE_INTEGRATION") and not dsn:
+        pytest.fail("Required integration needs an explicit isolated STUDIO_TEST_DATABASE_URL")
     try:
         import psycopg
     except ImportError:
@@ -26,11 +29,6 @@ def repository_factory():
     from psycopg import sql
     from production.repository import PostgresRepository
 
-    dsn = os.environ.get("STUDIO_TEST_DATABASE_URL") or os.environ.get("STUDIO_DATABASE_URL")
-    local = Path(__file__).resolve().parents[2] / ".runtime/studio/database-local.env"
-    if not dsn and local.is_file():
-        from dotenv import dotenv_values
-        dsn = dotenv_values(local).get("STUDIO_DATABASE_URL")
     if not dsn:
         if os.environ.get("STUDIO_REQUIRE_INTEGRATION"):
             pytest.fail("Studio integration requires a real PostgreSQL database")
@@ -45,7 +43,7 @@ def repository_factory():
                 migration = Path(__file__).resolve().parents[2] / "production/migrations/001_control_plane.sql"
                 connection.execute(migration.read_text(encoding="utf-8"))
                 connection.execute("INSERT INTO schema_migrations VALUES (1)")
-        repo = PostgresRepository(dsn, schema=schema + "_missing" if missing_schema else schema)
+        repo = PostgresRepository(dsn, schema=schema + "_missing" if missing_schema else schema, projects_dir=tmp_path / "projects")
         if not missing_schema:
             repo.migrate()
         return repo
@@ -327,7 +325,7 @@ def test_profile_turn_limits_and_credential_records_fail_before_reservation(repo
 
 def test_existing_control_plane_upgrades_to_call_and_file_journals(repository_factory):
     repository = repository_factory(previous_version=True)
-    assert repository.migrate() == 2
+    assert repository.migrate() == 5
     task = create(repository)
     claim = repository.claim_command("worker-a")
     repository.transition(task.task_id, TaskState.RUNNING, expected_version=1, fence=claim.context.fence)
