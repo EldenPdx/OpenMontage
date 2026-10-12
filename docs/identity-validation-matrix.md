@@ -1,26 +1,26 @@
 # AUTH-10 / #32 identity validation matrix
 
-**MATRIX PREPARATION ONLY — refreshed 2026-10-12. Every final #32 scenario below is PENDING and unexecuted.** This document specifies future acceptance observations; it supplies no working-login, SSO, authorization, migration, or media acceptance result. No identity test, fixture, CI, production code, or contract is added in this preparation.
+**IMPLEMENTATION IN PROGRESS — refreshed 2026-10-13. Every final #32 scenario below remains PENDING.** The reviewed node catalog, required-result guard, explicit cold-online bootstrap and mandatory identity CI are being implemented. Their CLI checks are not final real identity/SSO/migration/media acceptance. Formal #32 acceptance still requires #24–31 closure, real integrated runs and independent review.
 
 Authority: [#32](https://github.com/EldenPdx/OpenMontage/issues/32), [#22](https://github.com/EldenPdx/OpenMontage/issues/22), and [#23](https://github.com/EldenPdx/OpenMontage/issues/23), [#24](https://github.com/EldenPdx/OpenMontage/issues/24), [#25](https://github.com/EldenPdx/OpenMontage/issues/25), [#26](https://github.com/EldenPdx/OpenMontage/issues/26), [#27](https://github.com/EldenPdx/OpenMontage/issues/27), [#28](https://github.com/EldenPdx/OpenMontage/issues/28), [#29](https://github.com/EldenPdx/OpenMontage/issues/29), [#30](https://github.com/EldenPdx/OpenMontage/issues/30), [#31](https://github.com/EldenPdx/OpenMontage/issues/31). Read with [identity contracts](identity-contracts.md), [identity ADR](adr/0001-personal-organization-identity.md), [browser-production ADR](adr/browser-production.md), [production contracts](browser-production-contracts.md), and [GLOSSARY](../GLOSSARY.md). This matrix applies those contracts; interface changes return to the contract/module owner.
 
-Preparation owner: the assigned #32 implementation owner. Checkout: `/Users/eldenpdx/.codex/worktrees/auth-32-validation/OpenMontage`; branch: `codex/auth-32-validation`; original preparation commit: `30585082da16d1605048119086128610788c389a`. Sole tracked writable deliverable in this phase: this file. Parent owns PR creation, integration, GitHub evidence, and manual closure. Original dirty source is outside this change. Shared Serena remains on the other project; this worktree has no CodeGraph index and none is created. This refresh reads released foundation and in-progress #26 source without rebasing or executing it.
+Implementation owner: the assigned #32 agent. Checkout: `/Users/eldenpdx/.codex/worktrees/auth-32-validation/OpenMontage`; branch: `codex/auth-32-validation`; original preparation commit: `30585082da16d1605048119086128610788c389a`; current integrated foundation: `1e7001fea67a0da5c1d3640446828887bd37597b`. Root has assigned this owner the necessary bootstrap/images/manage/CI edits exclusively, plus dedicated acceptance tests, outcome accounting and runbooks. Parent owns integration, GitHub evidence and manual closure. Original dirty source is outside this change. Shared Serena remains on the other project; no CodeGraph index is created here.
 
 ## Readiness and evidence already available
 
-#23, #24 and #25 are CLOSED. Preserve [#23 acceptance](https://github.com/EldenPdx/OpenMontage/issues/23#issuecomment-6118047003), [#24 acceptance](https://github.com/EldenPdx/OpenMontage/issues/24#issuecomment-6120779037), and [#25 integrated acceptance](https://github.com/EldenPdx/OpenMontage/issues/25#issuecomment-6122106903), including PRs #33–#37. The recorded main is `896e1f0d78d150ef6f7a03ae60575670dd4b6499`; [main CI 38232359457](https://github.com/EldenPdx/OpenMontage/actions/runs/38232359457) succeeded with **2520 passed, 17 optional skipped, 3 expected xfailed**. This is foundation/regression evidence, not final #32 identity acceptance. Its existing skips/xfails never authorize omission of a required identity variant.
+#23–#29 are CLOSED after independent module review, integration and exact-main CI. Preserve [#23 acceptance](https://github.com/EldenPdx/OpenMontage/issues/23#issuecomment-6118047003), [#24 acceptance](https://github.com/EldenPdx/OpenMontage/issues/24#issuecomment-6120779037), and [#25 integrated acceptance](https://github.com/EldenPdx/OpenMontage/issues/25#issuecomment-6122106903), plus the later issue evidence and PRs #38–#41. Current main is `1e7001fea67a0da5c1d3640446828887bd37597b`; [main CI 38288469825](https://github.com/EldenPdx/OpenMontage/actions/runs/38288469825) succeeded with **2615 passed, 17 existing optional skipped, 3 expected xfailed, one subtest**. This is module/regression evidence, not final #32 identity acceptance. Existing optional skips/xfails never authorize omission of a required identity variant.
 
-Source accounting for this refresh: integration `eab5560e048ee27aa1cb1ac6664e2e2690fe9376`; runtime owner `9b0ee3151bbbdfe5a37c3515878082172ad2ed3a`; BFF snapshot `09fb1742d798d9c62522f40f9dae441579cc6edd`; shared guard/store snapshot `293db8bd7305a93f29f24f6b0428435c2522fa83`. #26 remains OPEN with final real reproduction/review/integration/CI/closure pending. Its [authority/retention coordination](https://github.com/EldenPdx/OpenMontage/issues/26#issuecomment-6122903966) and [external witness correction](https://github.com/EldenPdx/OpenMontage/issues/26#issuecomment-6123556053) describe the current required boundary. Later #26 working-tree tests and cleanup changes are not frozen evidence. Source inspection below is neither pytest collection nor a run, and does not sign off those commits.
+Historical preparation accounting: integration `eab5560e048ee27aa1cb1ac6664e2e2690fe9376`; runtime owner `9b0ee3151bbbdfe5a37c3515878082172ad2ed3a`; BFF snapshot `09fb1742d798d9c62522f40f9dae441579cc6edd`; shared guard/store snapshot `293db8bd7305a93f29f24f6b0428435c2522fa83`. The source-family table below describes that original snapshot. Current authoritative collected requirements are in `auth-runtime/required-nodes.json` on the integrated 1e7001f foundation. The [authority/retention coordination](https://github.com/EldenPdx/OpenMontage/issues/26#issuecomment-6122903966) and [external witness correction](https://github.com/EldenPdx/OpenMontage/issues/26#issuecomment-6123556053) remain binding. Collection and historical module signoff do not sign final #32 variants.
 
 | Dependency | State at preparation handoff | Required before final #32 acceptance |
 | --- | --- | --- |
 | #23 contracts | CLOSED; published acceptance and subsequent coordinated guard clarification | Preserve frozen behavior; coordinate any further contract correction |
 | #24 real identity runtime/fixtures | CLOSED; real foundation review/acceptance published | Reproduce required runtime/protocol/mutation phases on final candidate; PENDING |
 | #25 persistence/migration | CLOSED; real storage review and exact-main CI published | Reproduce integrated HTTP consumers and complete operator recovery on final candidate; PENDING |
-| #26 BFF/session/security | Implementing and independently reviewed; final witness/BFF checks in progress | Exact final real login/security review, integration, main CI and manual closure: PENDING |
-| #27 organizations/invitations | Not started | Real lifecycle/mail/recovery evidence, independent review, integration, required CI signoff, manual closure: PENDING |
-| #28 Studio/worker authorization | Worktree prepared only; await #26 closure and refreshed base | Real task/approval/Pi/result evidence, independent review, integration, required CI signoff, manual closure: PENDING |
-| #29 Backlot/media/SSE | Worktree prepared only; await #26 closure and refreshed base | All entry points and measured revocation evidence, independent review, integration, required CI signoff, manual closure: PENDING |
+| #26 BFF/session/security | CLOSED; released BFF/guard and main CI reviewed | Reproduce final integrated cases and independent otherwise-valid claim calibration; PENDING |
+| #27 organizations/invitations | CLOSED; real API/mail/native throttle/recovery independently reviewed | Reproduce final integrated node/variant observations; PENDING |
+| #28 Studio/worker authorization | CLOSED; both real authenticated productions and authorization independently reviewed | Reproduce final role-isolated Worker and complete matrix; PENDING |
+| #29 Backlot/media/SSE | CLOSED; media/aliases/streams and six real service outages independently reviewed | Reproduce final integrated node/variant observations; PENDING |
 | #30 standard OIDC and SAML SSO | Not started | Both real protocol/browser round trips, independent review, integration, required CI signoff, manual closure: PENDING |
 | #31 browser identity flows | Not started | Integrated #26–30 UI behavior, independent review, integration, required CI signoff, manual closure: PENDING |
 | #32 final validation/CI/operations | Matrix preparation only | Wait for every #24–31 requirement above, then execute this matrix on the integrated candidate and exact target-main SHA; PENDING |
@@ -295,6 +295,35 @@ For REV-01/02, expand the surface×cause ledger instead of claiming one `/me` te
 
 For SECRET-01–04, use unique private sentinels from actual app/M2M/session/token/ticket/IdP/worker configuration and inspect each real public DTO/error/SSE/media/URL/history/DOM/storage/log/argv/bridge/process/artifact/backup boundary. Ordinary PG rejection tests do not prove worker process isolation. Test distinct least-privilege session/BFF and Worker DB roles and the actual controlled Worker environment; keep identity/M2M/session keys absent without printing values. Publish only sanitized match locations/counts, never matching secrets or raw state.
 
+## Required claim-rejection sensitivity calibration
+
+The released #26 fault fixture uses `fault-subject` and provides no native Management API reads. Its valid signed control ends at an authority 503, so it is insufficient for final sensitivity signoff. Existing negative passes are retained as module evidence; none automatically signs the otherwise-valid #32 variant.
+
+The dedicated #32 calibration must relay only the configured fixture's M2M token exchange and fixed, allowlisted real Logto user/organization/role/scope GETs. It must keep a native fixture subject, known membership and usable BFF/PG session. For **each** target below, first complete callback → `/me` 200 → explicitly select the known member organization/role → owned resource 200; then change only the target in the same controlled protocol configuration/key/subject/authority. Invalid callback remains 401, creates no partial session and cannot alter production or read the owned resource. Multiple-audience controls include the correct azp before only azp is removed/changed. Native fixture ledgers are read-only; this calibration requires no membership/profile/lifecycle mutation.
+
+| Target variant | Execution/signoff |
+| --- | --- |
+| missing nonce | PENDING |
+| wrong nonce | PENDING |
+| wrong issuer | PENDING |
+| wrong audience | PENDING |
+| multiple audience, missing azp | PENDING |
+| multiple audience, wrong azp | PENDING |
+| expired exp | PENDING |
+| missing iss | PENDING |
+| missing sub | PENDING |
+| missing aud | PENDING |
+| missing exp | PENDING |
+| missing iat | PENDING |
+| future iat | PENDING |
+| boolean iat | PENDING |
+| wrong signature/key | PENDING |
+| missing ID token | PENDING |
+| UserInfo sub mismatch | PENDING |
+| nonfinite exp | PENDING |
+
+This is labeled controlled protocol calibration, never standard Logto/SSO success evidence. Native Logto and both upstream standard SSO protocols still require their separate real round trips and independent review. Product defects return to the module owner; the test cannot relax AuthConfig, add a production proxy or substitute cached authority.
+
 ## Version and environment record to fill at execution
 
 Foundation versions below are locked/source-observed or recorded in prior real module evidence. They replace the obsolete pre-implementation proposals. This preparation did not boot services, query private state or execute version binaries. Final #32 records actual versions, architecture, child manifest/config/image IDs and behavioral evidence again.
@@ -315,7 +344,17 @@ Foundation versions below are locked/source-observed or recorded in prior real m
 
 Choose a validated media binary directory for subprocess PATH while invoking Python explicitly. Sharing only a Python venv does not provide the official Pi CLI under the new source checkout's `.runtime/pi/source/packages/coding-agent/dist/bundle/cli.js`; install/verify the tracked runtime there. Capability/import/health probes are prerequisites, never PROD-01 or SSO acceptance.
 
-## Minimum future required CI plan — not implemented
+## Required CI implementation and execution gate
+
+The original gap and worksheet below are retained as preparation history. Current implementation adds `Required Real Identity` alongside the existing regression job. Its fresh runner is the sole lifecycle owner; bootstrap uses explicit `--online`, pinned uv 0.12.23/Node 24.21.0, existing fixed images/auth libraries/Pi and actual Chromium/FFmpeg. Runtime downloads remain offline without an explicit flag or process proxy. No local proxy setting is committed. The job is mandatory and has no `continue-on-error`.
+
+`auth-runtime/ci.py` runs private bounded dependency probes, real service pause/resume controls, absent-library/binary calibration, restricted isolated business PG setup, reviewed suite phases, narrow owner-checked cleanup and sanitized outcome publication. Raw commands, assertions, browser URLs/cookies, mail and private configuration stay under mode-0700 state with mode-0600 logs. Published artifacts are reconstructed from reviewed node IDs/outcome enums and scanned against private fixture credentials; raw diagnostics are excluded.
+
+`auth-runtime/required.py` requires exact equality of expected/collected/executed node IDs and passing setup/call/teardown, rejecting skip, xfail, xpass, empty/deselected/collect-only/missing nodes and teardown errors even when ordinary pytest would exit zero. The current catalog has 25 foundation, 146 storage/boundary, 39 BFF, 30 organization, 29 Studio, 33 Backlot, six actual-outage, 27 claim-calibration, four runtime-role/HTTPS and one authenticated-restore nodes: 340 total. These are **collected requirements, not a final integrated run**. #30/#31 and final #32 coordinated-native recovery nodes remain pending; `ci.py run` fails until their reviewed catalog is complete. No matrix variant is signed merely because a containing test node passes.
+
+Author preparation observations, pending exact-commit independent review: 15 operator/result-guard CLI cases passed; all 27 controlled-claim nodes passed with real native read-only membership; three distinct-role nodes passed with personal and organization real Pi/FFmpeg/browser deliveries; the native HTTPS custom-domain node passed with independently verified CA/SAN/TLS plus a received non-Secure witness cookie and absent Secure session cookie; the public whole-schema CLI backup/restore node passed on a separate empty database with original schema/key/cookie, exact media/Pi files, limited runtime principals and key rotation denials. Source schema and files remain retained. The early HTTPS headless-shell proxy behavior was independently isolated and resolved through standard full Chromium plus explicit test locale; no local proxy setting is committed. These observations do not mark the 113 final rows complete or substitute for coordinated Logto/IdP recovery, mandatory cold AMD64 CI, upstream SSO/UI or reviewer signoff.
+
+Cold AMD64 boot, final duration budgets, all real fault probes, upstream UI/SSO cases, node-to-variant observations, independent reviewer and exact-main CI remain PENDING. The initial 90-minute job/65-minute suite bounds must be checked against the actual final cold run. See [activation and recovery](identity-enable.md).
 
 Current `.github/workflows/ci.yml` runs one 30-minute **Validate Python** job: Python 3.11, Node 22.19.0, isolated PG, FFmpeg, `make install-studio-dev`, official `make studio-pi` + RPC check, Chromium, lint and `make test` (`tests/` only). It now generates a random masked `STUDIO_TEST_SESSION_KEY` at job runtime. It does **not** install uv, stage/start the identity environment, run `auth-runtime/tests/`, or account for all required identity variants.
 

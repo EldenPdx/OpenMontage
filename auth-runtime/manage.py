@@ -120,10 +120,10 @@ def bootstrap_management(credentials):
                            (credentials['bootstrap_app_id'], credentials['bootstrap_app_id']))
 
 
-def verify_images():
+def verify_images(*, online=False):
     path = STATE / "images/loaded.json"
     if not path.is_file():
-        stage_images(STATE)
+        stage_images(STATE, online=online)
     records = json.loads(path.read_text())
     for name, pin in PINS.items():
         expected = records.get(name, {})
@@ -132,10 +132,10 @@ def verify_images():
             raise RuntimeError("Staged identity image drifted; restage verified content")
 
 
-def up():
+def up(*, online=False):
     credentials = prepare()
     assert_ownership()
-    verify_images()
+    verify_images(online=online)
     compose("up", "--detach", "--wait", "--wait-timeout", "120", "--pull", "never", "--no-build", "identity-postgres")
     initialize_databases(credentials)
     compose("up", "--detach", "--wait", "--wait-timeout", "240", "--pull", "never", "--no-build", "keycloak", "mailpit", timeout=300)
@@ -180,6 +180,7 @@ def main():
     parser.add_argument("command", choices=("prepare", "images", "up", "check", "seed", "cleanup", "restart", "stop", "down"))
     parser.add_argument("--namespace", default="auth24")
     parser.add_argument("--app-origin", default="http://127.0.0.1:4760")
+    parser.add_argument("--online", action="store_true", help="Allow uncached image downloads; default is offline without a process proxy")
     args = parser.parse_args()
     command = args.command
     if command == "prepare":
@@ -187,9 +188,9 @@ def main():
         print("Private identity credentials prepared")
     elif command == "images":
         prepare()
-        stage_images(STATE)
+        stage_images(STATE, online=args.online)
     elif command == "up":
-        up()
+        up(online=args.online)
     elif command == "check":
         check()
     elif command in ("seed", "cleanup"):
@@ -208,7 +209,7 @@ def main():
         if command == "restart":
             compose("stop", "logto")
             compose("restart", "identity-postgres", "keycloak", "mailpit")
-            up()
+            up(online=args.online)
         else:
             compose(command)
             print("Owned identity services stopped; private credentials and volumes retained")

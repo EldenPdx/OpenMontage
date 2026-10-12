@@ -1,5 +1,6 @@
 """Verify pinned registry content in this process, then import local Docker archives."""
 
+import argparse
 import gzip
 import hashlib
 import json
@@ -62,7 +63,7 @@ def validate_manifest_config(manifest, config, platform):
             raise RuntimeError("Invalid image layer descriptor")
 
 
-def stage_images(state):
+def stage_images(state, *, online=False):
     platform = native_platform(json.loads(subprocess.check_output(["docker", "version", "--format", "{{json .Server}}"], text=True)))
     cache = Path(state) / "images"
     cache.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -86,8 +87,8 @@ def stage_images(state):
             if path.exists():
                 verify_file(path, digest)
                 return path
-            if not proxy:
-                raise RuntimeError("Image staging requires the operator's current-process HTTPS proxy")
+            if not (online or proxy):
+                raise RuntimeError("Uncached image content requires explicit --online permission or a current-process HTTPS proxy")
             headers = {"Accept": MEDIA_TYPES}
             if token:
                 headers["Authorization"] = "Bearer " + token
@@ -190,7 +191,10 @@ def stage_images(state):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--online", action="store_true", help="Allow uncached downloads; default is offline without a process proxy")
+    arguments = parser.parse_args()
     try:
-        stage_images(ROOT / ".state")
+        stage_images(ROOT / ".state", online=arguments.online)
     except (RuntimeError, requests.RequestException, OSError, subprocess.SubprocessError) as error:
         raise SystemExit(str(error) if isinstance(error, RuntimeError) else "Image staging failed; private diagnostics required")
