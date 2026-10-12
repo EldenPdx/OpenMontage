@@ -1,0 +1,87 @@
+name: openmontage-auth24
+services:
+  identity-postgres:
+    image: openmontage-auth/postgres:17.11-b0f9560a2de0
+    pull_policy: never
+    environment:
+      POSTGRES_USER: auth_bootstrap
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_bootstrap_password
+    secrets: [pg_bootstrap_password]
+    ports: ["127.0.0.1:55433:5432"]
+    volumes: [identity-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U auth_bootstrap -d postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+    labels: {org.openmontage.auth-runtime: "24-v1"}
+
+  keycloak:
+    image: openmontage-auth/keycloak:26.8.0-27b3230fbabb
+    pull_policy: never
+    env_file: ["${AUTH_STATE_DIR:?Private auth state directory required}/keycloak.env"]
+    command: [start-dev, --http-port=8180, --hostname=http://127.0.0.1:8180, --health-enabled=true]
+    depends_on:
+      identity-postgres: {condition: service_healthy}
+    # One network namespace makes the exact loopback IdP issuer reachable from Logto.
+    ports:
+      - "127.0.0.1:8180:8180"
+      - "127.0.0.1:3010:3001"
+      - "127.0.0.1:3011:3002"
+    healthcheck:
+      test: ["CMD", "bash", "-ec", "exec 3<>/dev/tcp/127.0.0.1/9000; printf 'GET /health/ready HTTP/1.0\r\n\r\n' >&3; read -r line <&3; [[ $$line == *200* ]]"]
+      interval: 3s
+      timeout: 5s
+      retries: 90
+    labels: {org.openmontage.auth-runtime: "24-v1"}
+
+  logto:
+    image: openmontage-auth/logto:1.44.0-847cdd2759ad
+    pull_policy: never
+    network_mode: service:keycloak
+    env_file: ["${AUTH_STATE_DIR:?Private auth state directory required}/logto.env"]
+    depends_on:
+      keycloak: {condition: service_healthy}
+      mailpit: {condition: service_started}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/oidc/.well-known/openid-configuration').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+    labels: {org.openmontage.auth-runtime: "24-v1"}
+
+  logto-seed:
+    profiles: [initialize]
+    image: openmontage-auth/logto:1.44.0-847cdd2759ad
+    pull_policy: never
+    network_mode: service:keycloak
+    env_file: ["${AUTH_STATE_DIR:?Private auth state directory required}/logto.env"]
+    secrets: [logto_bootstrap_env]
+    entrypoint: [sh, -ec, ". /run/secrets/logto_bootstrap_env; export DB_URL; exec npm run cli db seed -- --swe --encrypt-base-role --dapc"]
+    labels: {org.openmontage.auth-runtime: "24-v1"}
+
+  mailpit:
+    image: openmontage-auth/mailpit:1.31.5-94f6b70c1436
+    pull_policy: never
+    environment:
+      MP_DATABASE: /data/mailpit.db
+      MP_SMTP_AUTH_ACCEPT_ANY: "false"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "false"
+    ports: ["127.0.0.1:8025:8025", "127.0.0.1:1025:1025"]
+    volumes: [mail-data:/data]
+    labels: {org.openmontage.auth-runtime: "24-v1"}
+
+secrets:
+  pg_bootstrap_password:
+    file: "${AUTH_STATE_DIR:?Private auth state directory required}/pg-bootstrap.password"
+  logto_bootstrap_env:
+    file: "${AUTH_STATE_DIR:?Private auth state directory required}/logto-bootstrap.env"
+volumes:
+  identity-data:
+    labels: {org.openmontage.auth-runtime: "24-v1"}
+  mail-data:
+    labels: {org.openmontage.auth-runtime: "24-v1"}
+networks:
+  default:
+    driver: bridge
