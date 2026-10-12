@@ -1,0 +1,13 @@
+# Personal and organization identity
+
+Status: accepted specification for [#23](https://github.com/EldenPdx/OpenMontage/issues/23); implementation is delivered by #24–#32.
+
+Use Logto as the authority for identities, organizations, members and organization roles, and the existing PostgreSQL control plane as the authority for private BFF sessions, business ownership and accepted operation actors. A user is identified by the verified `(issuer, sub)` pair, with a separate immutable local `user_id`; a personal workspace does not require a Logto organization. This keeps enterprise membership changes independent of ownership and prevents equal email addresses from merging identities.
+
+The browser receives an opaque HttpOnly session cookie, never identity tokens. A request selects one verified workspace, and every business resource is authorized before reading, replaying an operation, emitting an event or returning media/cache headers. Accepted worker commands retain their original actor and owner independently of later browser logout or workspace selection. The [identity contracts](../identity-contracts.md) freeze these boundaries and their public behavior.
+
+Server-side sessions reuse PostgreSQL rather than adding Redis or encoding tokens in cookies. Session credentials use authenticated encryption with a protected key outside ordinary production records. Anonymous operation is an explicit trusted loopback compatibility mode; authenticated operation fails closed. Historical resources remain unassigned and hidden until a trusted operator applies an explicit, audited mapping. Authentication does not change canonical files, exact approval evidence, budget journals, leases/fences or the single execution slot defined in [browser-production](browser-production.md).
+
+Membership writes are revalidated against Logto; reads and streams revalidate at most every 30 seconds and reject identity-source failures. Business membership operations serialize per organization and persist recoverable intent because Logto and PostgreSQL cannot commit atomically. Platform operators must coordinate external Console membership administration with this same control plane when maintaining the last-admin invariant; Console mutations still revoke business access within the read window.
+
+Logto OSS is the free validation baseline, initially v1.44.0. #24 records immutable images, actual SDK and standard OIDC/SAML IdP versions before use. Cloud procurement, real customer IdP provisioning, paid generation and production deployment require separate authorization and are outside this implementation.
