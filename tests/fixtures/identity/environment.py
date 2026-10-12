@@ -100,6 +100,22 @@ class IdentityFixture:
         value = self._data["users"][user]
         return LoginCredentials(value["username"], value["email"], value["password"])
 
+    def fresh_mailbox_user(self):
+        """Give each mail case its own real recipient and native rate-limit bucket."""
+        alias = "mail" + secrets.token_hex(10)
+        namespace = self._data["namespace"]
+        value = {"id": None, "username": namespace.replace("-", "_") + "_" + alias,
+                 "email": namespace + "." + alias + "@openmontage.test", "password": "Aa9-" + secrets.token_urlsafe(24)}
+        self._data["users"][alias] = value
+        private_json(self.path, self._data)
+        user = self.api.request("POST", "/api/users", {
+            "username": value["username"], "primaryEmail": value["email"], "password": value["password"],
+            "name": namespace + " " + alias, "customData": {"auth24": namespace}})
+        value["id"] = user["id"]
+        self._data["resources"].append({"path": "/api/users/" + user["id"], "key": "username", "name": value["username"]})
+        private_json(self.path, self._data)
+        return alias
+
     @property
     def organizations(self):
         return dict(self._data["organizations"])

@@ -86,6 +86,7 @@ Import `load_fixture`, `seed_fixture` and `cleanup_fixture` from `tests.fixtures
 | `fixture.users`, `.organizations`, `.application`, `.idp` | Views of identifiers/configuration; application and IdP views omit passwords/app secrets. Do not publish whole ledgers. |
 | `.organization_roles(user, organization)` | Read authoritative roles using the same privileged management credential. |
 | `.login_credentials(user)`, `.idp_login_credentials(protocol)`, `.private_app_configuration(origin=None)` | Credentials for trusted test backends/browser drivers only; never serialize into DTOs or logs. |
+| `.fresh_mailbox_user()` | Create a real subject with a unique verified test mailbox in this private dataset; invitation cases use separate native recipient rate-limit buckets. Serialize writes to the dataset ledger. |
 | `.api`, `.set_roles`, `.add_member`, `.remove_member`, `.suspend` | Privileged test mutations; bypass application authorization and cannot establish its correctness. |
 | `.app_for_origin(origin)` | Idempotent exact Traditional-web callback registration; returns configuration without the secret. |
 | `.send_invitation`, `.cancel_invitation`, `.mail_ids`, `.wait_for_mail` | Real Logto invitation and local mailbox flow; received message bodies contain verification codes/links and remain private. |
