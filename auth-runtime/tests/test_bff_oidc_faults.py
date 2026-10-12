@@ -16,7 +16,7 @@ from tests.fixtures.auth26 import ORIGIN, auth_browser, identity_environment
 
 
 @contextmanager
-def signed_protocol_fault(config_path, mutate, *, bad_signature=False, missing_id_token=False):
+def signed_protocol_fault(config_path, mutate, *, bad_signature=False, missing_id_token=False, mismatched_userinfo=False):
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(key.public_key()))
     jwk.update(kid="fault-key", alg="RS256", use="sig")
@@ -51,7 +51,7 @@ def signed_protocol_fault(config_path, mutate, *, bad_signature=False, missing_i
 
     @provider.get("/oidc/me")
     def userinfo():
-        return {"sub": "different-subject"}
+        return {"sub": "different-subject" if mismatched_userinfo else "fault-subject"}
 
     with serving(provider) as origin:
         issuer = origin + "/oidc"
@@ -75,6 +75,15 @@ def test_nonfinite_id_token_date_is_rejected_as_unverified_identity(identity_env
         response = context.request.get(ORIGIN + "/api/auth/callback", params={"code": "fault-code", "state": state})
         assert response.status == 401
         assert response.json()["error"]["code"] == "unauthenticated"
+        assert context.request.get(ORIGIN + "/api/auth/me").status == 401
+
+
+def test_valid_protocol_control_reaches_a_distinct_authority_failure_instead_of_masking_token_rejections(identity_environment):
+    _, _, config_path = identity_environment
+    with signed_protocol_fault(config_path, lambda claims: None) as (context, state):
+        response = context.request.get(ORIGIN + "/api/auth/callback", params={"code": "fault-code", "state": state})
+        assert response.status == 503
+        assert response.json()["error"]["code"] == "identity_unavailable"
         assert context.request.get(ORIGIN + "/api/auth/me").status == 401
 
 
@@ -104,7 +113,8 @@ def test_signed_protocol_fault_cannot_leave_partial_authenticated_session(identi
         elif fault == "boolean_iat":
             claims["iat"] = True
 
-    with signed_protocol_fault(config_path, mutate, bad_signature=fault == "wrong_signature", missing_id_token=fault == "missing_id_token") as (context, state):
+    with signed_protocol_fault(config_path, mutate, bad_signature=fault == "wrong_signature", missing_id_token=fault == "missing_id_token",
+                               mismatched_userinfo=fault == "userinfo_sub_mismatch") as (context, state):
         response = context.request.get(ORIGIN + "/api/auth/callback", params={"code": "fault-code", "state": state})
         status = response.status
         assert status == 401

@@ -2,6 +2,7 @@
 
 from hashlib import sha256
 import hmac
+from pathlib import Path
 import re
 import secrets
 
@@ -124,7 +125,7 @@ def install_boundary(app, *, config, projects_dir):
             if config.database_url:
                 raise ContractViolation("Root classification is unavailable", "dependency_unavailable")
             return
-        if str(__import__("pathlib").Path(provenance.canonical_root).resolve()) != str(projects_dir.resolve()):
+        if str(Path(provenance.canonical_root).resolve()) != str(projects_dir.resolve()):
             raise ContractViolation("Root classification is unavailable", "dependency_unavailable")
         if provenance.classification == "file_only_legacy" and not config.database_url:
             return

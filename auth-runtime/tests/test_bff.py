@@ -20,18 +20,12 @@ from tests.fixtures.identity.browser import logto_register, logto_reset_password
 from tests.fixtures.auth26 import ORIGIN, identity_environment, auth_browser, signed_in, write_headers, intercepted_callback
 
 
-
-
-
-
-
-
 def test_real_login_returns_only_verified_personal_projection(identity_environment):
     fixture, repository, _ = identity_environment
     with auth_browser() as browser:
         context = browser.new_context()
         assert context.request.get(ORIGIN + "/api/auth/me").status == 401
-        signed_in(context, fixture)
+        page = signed_in(context, fixture)
         response = context.request.get(ORIGIN + "/api/auth/me")
         assert response.status == 200
         me = response.json()
@@ -47,9 +41,16 @@ def test_real_login_returns_only_verified_personal_projection(identity_environme
         assert not cookie["secure"] and len(cookie["value"]) >= 43
         assert response.headers["cache-control"] == "private, no-store"
         assert repository.projects_dir.joinpath(".openmontage-authenticated").is_file()
+        from production.auth.config import AuthConfig
+        from production.auth.routes import AuthRuntime
+        config = AuthConfig.load()
+        private = AuthRuntime(config).store.get_session(cookie["value"]).sdk_storage
+        browser_state = response.text() + page.content() + page.url + page.evaluate("JSON.stringify({local:{...localStorage},session:{...sessionStorage}})")
+        protected = (config.app_secret, config.management_app_secret, private["idToken"], private["refreshToken"])
+        credentials_remain_private = all(value not in browser_state for value in protected)
+        assert credentials_remain_private, "Browser URLs, storage and public content must not contain identity credentials"
+        assert page.url == ORIGIN + "/en"
         context.close()
-
-
 
 
 def test_workspace_switch_verifies_membership_and_invalidates_pending_writes(identity_environment):
@@ -106,6 +107,29 @@ def test_logout_revokes_local_cookie_and_completes_official_logto_signout(identi
         context.close()
 
 
+def test_suspended_account_can_still_revoke_its_local_session(identity_environment):
+    fixture, _, _ = identity_environment
+    try:
+        with auth_browser() as browser:
+            context = browser.new_context()
+            signed_in(context, fixture).close()
+            me = context.request.get(ORIGIN + "/api/auth/me").json()
+            old_cookie = next(item for item in context.cookies() if item["name"] == "openmontage_session")
+            fixture.suspend("u1", True)
+            assert context.request.get(ORIGIN + "/api/auth/me").status == 401
+            response = context.request.post(ORIGIN + "/api/auth/logout", data={}, headers=write_headers(me))
+            assert response.status == 200 and response.json()["logout_url"] is not None
+            assert context.request.get(ORIGIN + "/api/auth/me").status == 401
+            cloned = browser.new_context()
+            cloned.add_cookies([old_cookie])
+            assert cloned.request.get(ORIGIN + "/api/auth/me").status == 401
+            cloned.close()
+            context.close()
+    finally:
+        fixture.suspend("u1", False)
+        assert fixture.api.request("GET", "/api/users/" + fixture.users["u1"].id)["isSuspended"] is False
+
+
 def test_two_real_sessions_refresh_independently_and_survive_bff_restart(identity_environment):
     fixture, _, _ = identity_environment
     from backlot.server import create_app
@@ -143,9 +167,7 @@ def test_two_real_sessions_refresh_independently_and_survive_bff_restart(identit
             browser.close()
 
 
-
-
-def test_real_concurrent_callback_has_one_winner_and_spoofed_host_cannot_consume_it(identity_environment):
+def test_real_concurrent_callback_has_one_winner_and_bad_state_or_host_cannot_consume_it(identity_environment):
     fixture, _, _ = identity_environment
     capture = {"hold": True, "url": None}
     with auth_browser(callback_capture=capture) as browser:
@@ -153,6 +175,13 @@ def test_real_concurrent_callback_has_one_winner_and_spoofed_host_cannot_consume
         callback = intercepted_callback(context, fixture, capture)
         forged = context.request.get(callback, headers={"Host": "foreign.example"}, max_redirects=0)
         assert forged.status == 403
+        parsed = urlsplit(callback)
+        for replacement in (None, "wrong-state"):
+            query = [(key, value) for key, value in parse_qsl(parsed.query) if key != "state"]
+            if replacement is not None:
+                query.append(("state", replacement))
+            rejected = context.request.get(urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), "")), max_redirects=0)
+            assert rejected.status == 401
         cookies = {item["name"]: item["value"] for item in context.cookies(ORIGIN)}
         names = set(cookies)
         assert "openmontage_login" in names
@@ -164,6 +193,28 @@ def test_real_concurrent_callback_has_one_winner_and_spoofed_host_cannot_consume
             assert statuses == [303, 401], [response.json().get("error", {}).get("message") for response in responses if response.status_code != 303]
             winner = first if responses[0].status_code == 303 else second
             assert winner.get(ORIGIN + "/api/auth/me").status_code == 200
+        context.close()
+
+
+@pytest.mark.parametrize("alias,organization,status,role", [("cross", "A", 303, "editor"), ("u1", "B", 404, None)])
+def test_login_organization_hint_grants_only_a_current_member_workspace(identity_environment, alias, organization, status, role):
+    fixture, _, _ = identity_environment
+    with auth_browser() as browser:
+        context = browser.new_context()
+        page = context.new_page()
+        page.route("**/*", lambda route: route.continue_() if urlsplit(route.request.url).hostname in {"127.0.0.1", "localhost", "::1"} else route.abort())
+        page.goto(ORIGIN + "/api/auth/login?" + urlencode({"organization_id": fixture.organizations[organization], "return_to": "/ja"}))
+        with page.expect_response(lambda response: urlsplit(response.url).path == "/api/auth/callback") as callback:
+            logto_sign_in(page, fixture.login_credentials(alias))
+        assert callback.value.status == status
+        page.wait_for_url(ORIGIN + ("/ja" if status == 303 else "/en"))
+        response = context.request.get(ORIGIN + "/api/auth/me")
+        if status == 303:
+            assert response.status == 200
+            assert response.json()["workspace"]["key"] == "organization:" + fixture.organizations[organization]
+            assert response.json()["role"] == role
+        else:
+            assert response.status == 401
         context.close()
 
 
@@ -365,3 +416,54 @@ def test_logout_racing_workspace_rotation_accepts_only_one_session_generation(id
             assert all(status in {200, 401, 409} for status in statuses)
             assert httpx.get(ORIGIN + "/api/auth/me", headers={"Cookie": "openmontage_session=" + cookie}).status_code == 401
         context.close()
+
+
+def test_real_owned_root_stays_private_after_guard_loss_config_rollback_and_database_replacement(identity_environment):
+    import hashlib
+    from fastapi.testclient import TestClient
+    from backlot.server import create_app
+    from production.auth.config import AuthConfig
+    from production.contracts import Actor, TaskCreate, UserIdentity, WorkspaceContext
+    from production.ownership_guard import MARKER
+    from tests.fixtures.studio.repository import test_repository as isolated_repository
+    from tests.integration.test_studio_repository import snapshot
+
+    fixture, repository, _ = identity_environment
+    configured = AuthConfig.load()
+    with auth_browser() as browser:
+        context = browser.new_context()
+        signed_in(context, fixture).close()
+        me = context.request.get(ORIGIN + "/api/auth/me").json()
+        identity = UserIdentity(user_id=me["user"]["user_id"], issuer=configured.issuer, sub=fixture.users["u1"].id)
+        workspace = WorkspaceContext(kind="personal", owner_id=identity.user_id)
+        task = repository.create_task(TaskCreate(brief="Private rollback production"), snapshot(), "bff26-root-rollback",
+                                      workspace=workspace, actor=Actor(identity=identity, workspace=workspace))
+        assert repository.get_task_for_workspace(task.task_id, workspace).ownership.creator == identity
+        context.close()
+    project = repository.projects_dir / task.project_id
+    project.mkdir(exist_ok=True)
+    metadata, output = project / "project.json", project / "private.txt"
+    metadata.write_text(json.dumps({"project_id": task.project_id, "title": "Private production", "pipeline_type": "framework-smoke"}))
+    output.write_text("real-owned-output-sentinel")
+    hashes = {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in (metadata, output)}
+    for directory in (repository.projects_dir, project):
+        (directory / MARKER).unlink()
+
+    with isolated_repository() as replacement:
+        local = AuthConfig(mode="local")
+        configurations = (local, local.model_copy(update={"database_url": "postgresql://invalid@127.0.0.1:1/unavailable"}),
+                          local.model_copy(update={"database_url": configured.database_url, "database_schema": replacement.schema}))
+        for configuration in configurations:
+            with TestClient(create_app(auth_config=configuration, auth_environment={}), base_url="http://127.0.0.1",
+                            client=("127.0.0.1", 12345)) as client:
+                for path in ("/api/projects", f"/api/project/{task.project_id}/state", f"/media/{task.project_id}/private.txt",
+                             f"/thumb/{task.project_id}/private.txt", "/api/library/events", f"/api/project/{task.project_id}/events",
+                             f"/p/{task.project_id}", f"/en/p/{task.project_id}", "/api/studio/config", "/api/studio/tasks",
+                             f"/api/studio/tasks/{task.task_id}/result?download=1"):
+                    response = client.get(path, follow_redirects=False, headers={"Range": "bytes=0-9", "If-None-Match": '"prior"'})
+                    assert response.status_code == 503
+                    assert "real-owned-output-sentinel" not in response.text and task.project_id not in response.text
+                    assert not {"etag", "content-range", "accept-ranges"} & response.headers.keys()
+                assert client.get("/api/health").status_code == 200
+                assert client.get("/ui/board.html").status_code == 200
+    assert {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in hashes} == hashes
