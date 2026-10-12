@@ -92,7 +92,7 @@ def seed_keycloak(state, fixture):
                     "redirectUris": [sp["assertionConsumerServiceUrl"]], "attributes": {
                         "saml_assertion_consumer_url_post": sp["assertionConsumerServiceUrl"], "saml.force.post.binding": "true",
                         "saml.server.signature": "true", "saml.assertion.signature": "true", "saml.client.signature": "false",
-                        "saml.signature.algorithm": "RSA_SHA256", "saml.name_id.format": "persistent", "saml.force.name.id.format": "true"},
+                        "saml.signature.algorithm": "RSA_SHA256", "saml_name_id_format": "persistent", "saml_force_name_id_format": "true"},
                     "protocolMappers": [{"name": name, "protocol": "saml", "protocolMapper": "saml-user-property-mapper",
                         "config": {"attribute.nameformat": "Basic", "attribute.name": name, "friendly.name": name, "user.attribute": attribute}}
                         for name, attribute in (("email", "email"), ("name", "firstName"))]}
