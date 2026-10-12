@@ -55,6 +55,8 @@ def create_app(*, studio_repository=None, studio_config=None, studio_environment
     if runtime is not None:
         from production.auth.routes import mount_auth
         mount_auth(app, runtime)
+        from production.api.organizations import mount_organizations
+        mount_organizations(app, runtime)
     elif mode == "local":
         @app.get("/api/auth/me")
         async def local_identity():

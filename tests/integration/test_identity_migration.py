@@ -236,8 +236,8 @@ def test_restore_cli_rejects_old_subset_archive_and_retains_binding_and_protecti
 def test_populated_v2_upgrade_and_dry_run_preserve_journals_and_canonical_bytes(legacy):
     repo, projects, runtime = legacy
     before, files = journals(repo), bytes_on_disk(projects, runtime)
-    assert repo.migrate() == 5
-    assert repo.migrate() == 5
+    assert repo.migrate() == 6
+    assert repo.migrate() == 6
     assert repo.get_call("call-legacy").reserved_usd_micros == 100000
     assert repo.approved_gate("task-legacy", "gate-legacy").binding.artifact_sha256 == sha256((projects / "legacy-project/artifacts/script.json").read_bytes()).hexdigest()
     assert len(repo.unresolved_intents("task-legacy")) == 2

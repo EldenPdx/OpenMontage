@@ -375,6 +375,27 @@ class InvitationRecord(InvitationDTO):
 class InvitationTransition(ContractModel):
     invitation_id: str = Field(min_length=1, max_length=256)
     status: Literal["accepted", "cancelled"]
+    accepted_at: datetime | None = None
+    accepted_user_id: str | None = Field(default=None, min_length=1, max_length=256)
+
+    @model_validator(mode="after")
+    def acceptance_evidence(self):
+        if (self.accepted_at is None) != (self.accepted_user_id is None) or self.accepted_at is not None and (self.status != "accepted" or self.accepted_at.tzinfo is None):
+            raise ValueError("Invalid authoritative acceptance evidence")
+        return self
+
+
+class InvitationCreationMaterial(ContractModel):
+    ticket: str = Field(min_length=43, max_length=128, pattern=r"^[A-Za-z0-9_-]+$", repr=False)
+    expires_at: datetime
+    organization_role_id: str = Field(min_length=1, max_length=256)
+    prior_native_invitation_ids: tuple[str, ...] = Field(max_length=1000)
+
+    @model_validator(mode="after")
+    def private_creation_constraints(self):
+        if self.expires_at.tzinfo is None or len(set(self.prior_native_invitation_ids)) != len(self.prior_native_invitation_ids) or any(not 1 <= len(value) <= 256 for value in self.prior_native_invitation_ids):
+            raise ValueError("Invalid private invitation material")
+        return self
 
 
 class OperationScope(ContractModel):
@@ -394,7 +415,7 @@ class OrganizationOperationTarget(ContractModel):
 
 
 class OrganizationOperationResult(ContractModel):
-    status_code: Literal[200, 201, 204, 409, 422, 503]
+    status_code: Literal[200, 201, 204, 401, 403, 404, 409, 422, 503]
     body: OrganizationDTO | MemberDTO | InvitationDTO | ErrorDTO | None = None
 
     @model_validator(mode="after")
@@ -687,6 +708,12 @@ class IdentityStore(Protocol):
     def reject_prepared_organization_intent(self, scope: OperationScope, *, expected_revision: int, result: OrganizationOperationResult) -> OrganizationIntent: ...
     def store_invitation(self, scope: OperationScope, *, expected_revision: int, invitation: InvitationDTO, ticket: str, intended_user_id: str | None = None) -> InvitationRecord: ...
     def invitation_for_ticket(self, ticket: str) -> InvitationRecord: ...
+    def invitation_for_acceptance(self, scope: OperationScope, *, ticket: str, verified_email: str) -> InvitationRecord: ...
+    def get_invitation(self, actor: Actor, invitation_id: str) -> InvitationRecord: ...
+    def list_invitations(self, actor: Actor, *, after_id: str | None = None, limit: int = 101) -> list[InvitationRecord]: ...
+    def prepare_invitation_creation(self, scope: OperationScope, *, expected_revision: int, material: InvitationCreationMaterial) -> OrganizationIntent: ...
+    def invitation_creation_material(self, scope: OperationScope) -> InvitationCreationMaterial | None: ...
+    def active_organization_intent(self, actor: Actor) -> OrganizationIntent | None: ...
 
 
 class PiRunner(Protocol):
