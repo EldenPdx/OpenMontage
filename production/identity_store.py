@@ -14,7 +14,7 @@ from psycopg.types.json import Jsonb
 
 from production.contracts import (
     Actor, AuthSession, ConsumedLoginInteraction, ContractViolation, ErrorDTO, IntentAcceptance, InvitationDTO,
-    InvitationRecord, InvitationTransition, MemberDTO, OperationScope, OrganizationDTO,
+    InvitationCreationMaterial, InvitationRecord, InvitationTransition, MemberDTO, OperationScope, OrganizationDTO,
     OrganizationIntent, OrganizationOperationResult, OrganizationOperationTarget, SafeRemoteRefs,
     SessionHandle, StoredSession, UserIdentity, WorkspaceContext,
 )
@@ -317,7 +317,7 @@ class PostgresIdentityStore:
             intent = OrganizationIntent(operation_id="operation-" + uuid4().hex, scope=scope, target=target,
                                         organization_id=target.organization_id, request_sha256=request_sha256,
                                         created_at=_now(), updated_at=_now())
-            connection.execute("INSERT INTO organization_intents VALUES (%s,%s,%s,%s)", (key, intent.operation_id, intent.organization_id, _json(intent)))
+            connection.execute("INSERT INTO organization_intents(scope,operation_id,organization_id,record) VALUES (%s,%s,%s,%s)", (key, intent.operation_id, intent.organization_id, _json(intent)))
             if intent.organization_id:
                 self._own_organization(connection, intent.organization_id, intent.operation_id)
             self.repository._audit(connection, scope.actor, scope.operation, scope.resource_id, "accepted", operation_id=intent.operation_id)
@@ -327,6 +327,15 @@ class PostgresIdentityStore:
         scope = OperationScope.model_validate(scope)
         with self.repository._connection() as connection:
             row = connection.execute("SELECT record FROM organization_intents WHERE scope=%s", (self._operation_scope(scope),)).fetchone()
+            return OrganizationIntent.model_validate(row["record"]) if row else None
+
+    def active_organization_intent(self, actor):
+        actor = Actor.model_validate(actor)
+        if actor.workspace.kind != "organization":
+            raise ContractViolation("Not found", "not_found")
+        with self.repository._connection() as connection:
+            self._identity(connection, actor.identity, actor.workspace)
+            row = connection.execute("SELECT i.record FROM organization_operation_owners o JOIN organization_intents i USING(operation_id) WHERE o.organization_id=%s", (actor.workspace.owner_id,)).fetchone()
             return OrganizationIntent.model_validate(row["record"]) if row else None
 
     def _locked_intent(self, connection, scope, expected_revision):
@@ -400,7 +409,8 @@ class PostgresIdentityStore:
                 invitation = InvitationRecord.model_validate(row["record"])
                 if transition.status == "accepted":
                     now = connection.execute("SELECT clock_timestamp() AS now").fetchone()["now"]
-                    if row["expires_at"] <= now or invitation.intended_user_id not in {None, scope.actor.identity.user_id}:
+                    evidence = transition.accepted_at is not None and transition.accepted_user_id == scope.actor.identity.sub and transition.accepted_at <= min(row["expires_at"], now)
+                    if transition.accepted_at is not None and not evidence or row["expires_at"] <= now and not evidence or invitation.intended_user_id not in {None, scope.actor.identity.user_id}:
                         raise ContractViolation("Invitation unavailable", "invitation_invalid")
                     invitation = invitation.model_copy(update={"intended_user_id": scope.actor.identity.user_id})
                 invitation = invitation.model_copy(update={"status": transition.status})
@@ -453,6 +463,39 @@ class PostgresIdentityStore:
             connection.execute("INSERT INTO identity_invitations VALUES (%s,%s,%s,%s,%s,%s)", (record.invitation_id, record.organization_id, record.ticket_hash, record.expires_at, record.status, _json(record)))
             return record
 
+    def prepare_invitation_creation(self, scope, *, expected_revision, material):
+        scope, material = OperationScope.model_validate(scope), InvitationCreationMaterial.model_validate(material)
+        with self.repository._connection() as connection:
+            self._identity(connection, scope.actor.identity, scope.actor.workspace)
+            intent = self._locked_intent(connection, scope, expected_revision)
+            if scope.operation != "invitation:create" or intent.status != "prepared":
+                raise ContractViolation("Invalid invitation preparation", "state_conflict")
+            now = connection.execute("SELECT clock_timestamp() AS now").fetchone()["now"]
+            if not now < material.expires_at <= now + timedelta(days=7):
+                raise ContractViolation("Invalid invitation expiry")
+            row = connection.execute("SELECT invitation_material FROM organization_intents WHERE scope=%s", (self._operation_scope(scope),)).fetchone()
+            if row["invitation_material"] is not None:
+                saved = InvitationCreationMaterial.model_validate(self._open(row["invitation_material"], "invitation-creation", intent.operation_id))
+                if saved != material:
+                    raise ContractViolation("Conflicting invitation material", "idempotency_conflict")
+                return intent
+            connection.execute("UPDATE organization_intents SET invitation_material=%s WHERE scope=%s", (self._seal(material.model_dump(mode="json"), "invitation-creation", intent.operation_id), self._operation_scope(scope)))
+            intent = intent.model_copy(update={"revision": intent.revision + 1, "updated_at": _now()})
+            self._save_intent(connection, intent)
+            return intent
+
+    def invitation_creation_material(self, scope):
+        scope = OperationScope.model_validate(scope)
+        with self.repository._connection() as connection:
+            self._identity(connection, scope.actor.identity, scope.actor.workspace)
+            row = connection.execute("SELECT record,invitation_material FROM organization_intents WHERE scope=%s", (self._operation_scope(scope),)).fetchone()
+            if row is None or scope.operation != "invitation:create":
+                raise ContractViolation("Organization operation not found", "not_found")
+            intent = OrganizationIntent.model_validate(row["record"])
+            if intent.scope != scope:
+                raise ContractViolation("Organization operation not found", "not_found")
+            return InvitationCreationMaterial.model_validate(self._open(row["invitation_material"], "invitation-creation", intent.operation_id)) if row["invitation_material"] is not None else None
+
     def invitation_for_ticket(self, ticket):
         if not isinstance(ticket, str):
             raise ContractViolation("Invitation unavailable", "invitation_invalid")
@@ -461,6 +504,57 @@ class PostgresIdentityStore:
             if row is None:
                 raise ContractViolation("Invitation unavailable", "invitation_invalid")
             return InvitationRecord.model_validate(row["record"])
+
+    def invitation_for_acceptance(self, scope, *, ticket, verified_email):
+        scope = OperationScope.model_validate(scope)
+        if scope.operation != "invitation:accept" or scope.resource_id != "invitations" or not isinstance(ticket, str) or not isinstance(verified_email, str):
+            raise ContractViolation("Invitation unavailable", "invitation_invalid")
+        with self.repository._connection() as connection:
+            self._identity(connection, scope.actor.identity, scope.actor.workspace)
+            row = connection.execute("SELECT *,expires_at>clock_timestamp() AS valid FROM identity_invitations WHERE ticket_hash=%s", (_hash(ticket),)).fetchone()
+            if row is None:
+                raise ContractViolation("Invitation unavailable", "invitation_invalid")
+            invitation = InvitationRecord.model_validate(row["record"])
+            actor = scope.actor
+            if actor.workspace.kind == "organization" and actor.workspace.owner_id != invitation.organization_id:
+                raise ContractViolation("Not found", "not_found")
+            operation = connection.execute("SELECT record FROM organization_intents WHERE scope=%s", (self._operation_scope(scope),)).fetchone()
+            intent = OrganizationIntent.model_validate(operation["record"]) if operation else None
+            same = intent is not None and (intent.target.invitation_id, intent.target.organization_id, intent.target.user_id) == (invitation.invitation_id, invitation.organization_id, actor.identity.user_id)
+            if invitation.status == "accepted" and same and intent.status == "committed" and invitation.intended_user_id == actor.identity.user_id:
+                return invitation
+            if invitation.status != "pending" or invitation.email.casefold() != verified_email.casefold() or invitation.intended_user_id not in {None, actor.identity.user_id}:
+                raise ContractViolation("Invitation unavailable", "invitation_invalid")
+            if not row["valid"] and not (same and intent.status in {"submitted", "recovery_required"}):
+                raise ContractViolation("Invitation unavailable", "invitation_invalid")
+            return invitation
+
+    def get_invitation(self, actor, invitation_id):
+        actor = Actor.model_validate(actor)
+        if actor.workspace.kind != "organization":
+            raise ContractViolation("Not found", "not_found")
+        with self.repository._connection() as connection:
+            self._identity(connection, actor.identity, actor.workspace)
+            row = connection.execute("SELECT record,expires_at<=clock_timestamp() AS expired FROM identity_invitations WHERE invitation_id=%s AND organization_id=%s", (invitation_id, actor.workspace.owner_id)).fetchone()
+            if row is None:
+                raise ContractViolation("Not found", "not_found")
+            invitation = InvitationRecord.model_validate(row["record"])
+            return invitation.model_copy(update={"status": "expired"}) if row["expired"] and invitation.status == "pending" else invitation
+
+    def list_invitations(self, actor, *, after_id=None, limit=101):
+        actor = Actor.model_validate(actor)
+        if actor.workspace.kind != "organization":
+            raise ContractViolation("Not found", "not_found")
+        if type(limit) is not int or not 1 <= limit <= 1001:
+            raise ContractViolation("Invalid invitation pagination")
+        with self.repository._connection() as connection:
+            self._identity(connection, actor.identity, actor.workspace)
+            rows = connection.execute("SELECT record,expires_at<=clock_timestamp() AS expired FROM identity_invitations WHERE organization_id=%s AND (%s::text IS NULL OR invitation_id>%s) ORDER BY invitation_id LIMIT %s", (actor.workspace.owner_id, after_id, after_id, limit)).fetchall()
+            result = []
+            for row in rows:
+                invitation = InvitationRecord.model_validate(row["record"])
+                result.append(invitation.model_copy(update={"status": "expired"}) if row["expired"] and invitation.status == "pending" else invitation)
+            return result
 
     def storage(self, cookie):
         return SessionStorage(self, cookie)
