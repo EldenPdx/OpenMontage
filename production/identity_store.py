@@ -106,6 +106,8 @@ class PostgresIdentityStore:
         return connection.execute("SELECT * FROM auth_sessions WHERE session_hash=%s AND revoked_at IS NULL AND absolute_expires_at>clock_timestamp() AND idle_expires_at>clock_timestamp()" + (" FOR UPDATE" if lock else ""), (_hash(cookie),)).fetchone()
 
     def _insert_session(self, connection, identity, workspace, sdk_storage, *, absolute_seconds=86400, idle_seconds=28800, absolute_expires_at=None, created_at=None):
+        if isinstance(absolute_seconds, bool) or isinstance(idle_seconds, bool) or not isinstance(absolute_seconds, int) or not isinstance(idle_seconds, int) or not 1 <= absolute_seconds <= 86400 or not 1 <= idle_seconds <= 28800:
+            raise ContractViolation("Invalid session lifetime")
         cookie, csrf, context = [secrets.token_urlsafe(32) for _ in range(3)]
         now = connection.execute("SELECT clock_timestamp() AS now").fetchone()["now"]
         absolute = absolute_expires_at or now + timedelta(seconds=absolute_seconds)
@@ -119,8 +121,6 @@ class PostgresIdentityStore:
         return SessionHandle(cookie, self._materialize(row))
 
     def create_session(self, identity, workspace, *, sdk_storage, absolute_seconds=86400, idle_seconds=28800):
-        if isinstance(absolute_seconds, bool) or isinstance(idle_seconds, bool) or not isinstance(absolute_seconds, int) or not isinstance(idle_seconds, int) or not 1 <= absolute_seconds <= 86400 or not 1 <= idle_seconds <= 28800:
-            raise ContractViolation("Invalid session lifetime")
         with self.repository._connection() as connection:
             identity, workspace = self._identity(connection, identity, workspace)
             return self._insert_session(connection, identity, workspace, sdk_storage, absolute_seconds=absolute_seconds, idle_seconds=idle_seconds)
@@ -239,7 +239,7 @@ class PostgresIdentityStore:
             payload = self._open(row["storage"], "interaction", row["reference"])
             return ConsumedLoginInteraction(row["reference"], completion, **payload)
 
-    def complete_login(self, interaction, identity, workspace, *, sdk_storage):
+    def complete_login(self, interaction, identity, workspace, *, sdk_storage, absolute_seconds=86400, idle_seconds=28800):
         if not isinstance(interaction, ConsumedLoginInteraction):
             raise ContractViolation("Login interaction unavailable", "unauthenticated")
         with self.repository._connection() as connection:
@@ -248,7 +248,7 @@ class PostgresIdentityStore:
                 raise ContractViolation("Login interaction unavailable", "unauthenticated")
             self._open(row["storage"], "interaction", row["reference"])
             identity, workspace = self._identity(connection, identity, workspace)
-            result = self._insert_session(connection, identity, workspace, sdk_storage)
+            result = self._insert_session(connection, identity, workspace, sdk_storage, absolute_seconds=absolute_seconds, idle_seconds=idle_seconds)
             connection.execute("UPDATE login_interactions SET completed_at=clock_timestamp() WHERE reference=%s", (row["reference"],))
             if row["previous_session_hash"]:
                 connection.execute("UPDATE auth_sessions SET revoked_at=clock_timestamp(),revision=revision+1 WHERE session_hash=%s AND revoked_at IS NULL", (row["previous_session_hash"],))
