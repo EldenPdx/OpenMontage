@@ -165,7 +165,7 @@ class IdentityFixture:
         self.api.request("DELETE", f"/api/organizations/{self.organizations[organization]}/users/{self.users[user].id}")
 
     def suspend(self, user, suspended=True):
-        self.api.request("PATCH", f"/api/users/{self.users[user].id}", {"isSuspended": suspended})
+        self.api.request("PATCH", f"/api/users/{self.users[user].id}/is-suspended", {"isSuspended": suspended})
 
     def send_invitation(self, recipient, organization, role):
         if role not in CAPABILITIES or not recipient.endswith("@openmontage.test") or not recipient.startswith(self._data["namespace"]):
