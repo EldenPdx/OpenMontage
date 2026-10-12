@@ -41,6 +41,17 @@ services:
     pull_policy: never
     network_mode: service:keycloak
     env_file: ["${AUTH_STATE_DIR:?Private auth state directory required}/logto.env"]
+    volumes:
+      - type: bind
+        source: "${AUTH_STATE_DIR:?Private auth state directory required}/sso/main-YCQ7ZWUE.js"
+        target: /etc/logto/packages/core/build/main-YCQ7ZWUE.js
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: "${AUTH_STATE_DIR:?Private auth state directory required}/sso/openmontage-sso.mjs"
+        target: /etc/logto/packages/core/build/openmontage-sso.mjs
+        read_only: true
+        bind: {create_host_path: false}
     depends_on:
       keycloak: {condition: service_healthy}
       mailpit: {condition: service_started}
