@@ -136,9 +136,9 @@ def test_subset_mapping_cli_backup_restores_every_project_output_and_exact_sessi
     mapping = tmp_path / "mapping.json"
     mapping.write_text(json.dumps([{"project_id": "legacy-project", "creator_user_id": user.user_id,
                                     "workspace": {"kind": "personal", "owner_id": user.user_id}}]))
-    private = json.loads(Path('/tmp/openmontage-auth-20261012/persistence-private.json').read_text())
+    container = os.environ.get("STUDIO_TEST_POSTGRES_CONTAINER")
     configuration = tmp_path / "operator-private.json"
-    configuration.write_text(json.dumps({"database_url": os.environ["STUDIO_TEST_DATABASE_URL"], "postgres_container": private["container"]}))
+    configuration.write_text(json.dumps({"database_url": os.environ["STUDIO_TEST_DATABASE_URL"], "postgres_container": container}))
     configuration.chmod(0o600)
     archive = tmp_path.resolve() / "backup"
     original = {str(path.relative_to(root)): path.read_bytes() for root in (projects, runtime) for path in root.rglob("*") if path.is_file()}
@@ -194,9 +194,9 @@ def test_restore_cli_rejects_old_subset_archive_and_retains_binding_and_protecti
     user = identity_store(repo).resolve_user("https://identity.test/oidc", "mapped-creator")
     mapping = [{"project_id": "legacy-project", "creator_user_id": user.user_id,
                 "workspace": {"kind": "personal", "owner_id": user.user_id}}]
-    private = json.loads(Path('/tmp/openmontage-auth-20261012/persistence-private.json').read_text())
+    container = os.environ.get("STUDIO_TEST_POSTGRES_CONTAINER")
     importer = OwnershipImporter(repo, projects_dir=projects, runtime_root=runtime)
-    backup = importer.backup(importer.plan(mapping), tmp_path.resolve() / "backup", postgres_container=private["container"])
+    backup = importer.backup(importer.plan(mapping), tmp_path.resolve() / "backup", postgres_container=container)
     # Reproduce the old schema-wide dump with only the mapped file inventory.
     manifest = json.loads((backup.directory / "manifest.json").read_text())
     missing = {"video": "projects/unmapped-project/render.mp4", "session": "runtime/sessions/task-unmapped/run-unmapped/session.jsonl"}
@@ -205,7 +205,7 @@ def test_restore_cli_rejects_old_subset_archive_and_retains_binding_and_protecti
     (backup.directory / "manifest.json").write_text(json.dumps(manifest))
     original, before = bytes_on_disk(projects, runtime), journals(repo)
     configuration = tmp_path / "operator-private.json"
-    configuration.write_text(json.dumps({"database_url": os.environ["STUDIO_TEST_DATABASE_URL"], "postgres_container": private["container"]}))
+    configuration.write_text(json.dumps({"database_url": os.environ["STUDIO_TEST_DATABASE_URL"], "postgres_container": container}))
     configuration.chmod(0o600)
     with psycopg.connect(os.environ["STUDIO_TEST_DATABASE_URL"]) as connection:
         connection.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(repo.schema)))
@@ -263,7 +263,7 @@ def test_explicit_import_backup_atomic_apply_reapply_and_real_restore(legacy, tm
     mapping = [{"project_id": "legacy-project", "creator_user_id": user.user_id,
                 "workspace": {"kind": "personal", "owner_id": user.user_id}}]
     plan = importer.plan(mapping)
-    container = json.loads(Path('/tmp/openmontage-auth-20261012/persistence-private.json').read_text())["container"]
+    container = os.environ.get("STUDIO_TEST_POSTGRES_CONTAINER")
     backup = importer.backup(plan, tmp_path / "private-backup", postgres_container=container)
     files = bytes_on_disk(projects, runtime)
     # This seam receives trusted authority data; it does not assert an OIDC/Logto round trip.
@@ -302,8 +302,8 @@ def test_operator_cli_refuses_apply_without_real_authority_before_any_assignment
     mapping_file = tmp_path / "mapping.json"
     mapping_file.write_text(json.dumps(mapping))
     plan = importer.plan(mapping)
-    private = json.loads(Path('/tmp/openmontage-auth-20261012/persistence-private.json').read_text())
-    backup = importer.backup(plan, tmp_path / "backup", postgres_container=private["container"])
+    container = os.environ.get("STUDIO_TEST_POSTGRES_CONTAINER")
+    backup = importer.backup(plan, tmp_path / "backup", postgres_container=container)
     configuration = tmp_path / "operator-private.json"
     configuration.write_text(json.dumps({"database_url": os.environ["STUDIO_TEST_DATABASE_URL"]}))
     configuration.chmod(0o600)
@@ -328,7 +328,7 @@ def test_restore_recreates_only_missing_test_files_and_guards_before_exposure(le
     importer = OwnershipImporter(repo, projects_dir=projects, runtime_root=runtime)
     mapping = [{"project_id": "legacy-project", "creator_user_id": user.user_id, "workspace": {"kind": "personal", "owner_id": user.user_id}}]
     before = bytes_on_disk(projects, runtime)
-    container = json.loads(Path('/tmp/openmontage-auth-20261012/persistence-private.json').read_text())["container"]
+    container = os.environ.get("STUDIO_TEST_POSTGRES_CONTAINER")
     backup = importer.backup(importer.plan(mapping), tmp_path / "backup", postgres_container=container)
     shutil.rmtree(projects)
     shutil.rmtree(runtime)
@@ -355,7 +355,7 @@ def test_import_conflict_after_backup_aborts_entire_batch_without_touching_journ
     mapping = [{"project_id": name, "creator_user_id": user.user_id, "workspace": {"kind": "personal", "owner_id": user.user_id}} for name in ("legacy-project", "cli-project")]
     importer = OwnershipImporter(repo, projects_dir=projects, runtime_root=runtime)
     plan = importer.plan(mapping)
-    container = json.loads(Path('/tmp/openmontage-auth-20261012/persistence-private.json').read_text())["container"]
+    container = os.environ.get("STUDIO_TEST_POSTGRES_CONTAINER")
     backup = importer.backup(plan, tmp_path / "backup", postgres_container=container)
     with psycopg.connect(os.environ["STUDIO_TEST_DATABASE_URL"]) as connection:
         foreign_owner = {"workspace": {"kind": "personal", "owner_id": foreign.user_id}, "creator": foreign.model_dump()}
@@ -400,7 +400,7 @@ def test_corrupt_backup_and_failed_guard_never_partially_assign(legacy, tmp_path
     importer = OwnershipImporter(repo, projects_dir=projects, runtime_root=runtime)
     mapping = [{"project_id": "legacy-project", "creator_user_id": user.user_id, "workspace": {"kind": "personal", "owner_id": user.user_id}}]
     plan = importer.plan(mapping)
-    container = json.loads(Path('/tmp/openmontage-auth-20261012/persistence-private.json').read_text())["container"]
+    container = os.environ.get("STUDIO_TEST_POSTGRES_CONTAINER")
     backup = importer.backup(plan, tmp_path / "backup", postgres_container=container)
     evidence = AuthorityEvidence(mapping_sha256=plan.mapping_sha256, checked_at=datetime.now(timezone.utc), identities=[user], organization_ids=[])
     dump = backup.directory / "database.dump"
