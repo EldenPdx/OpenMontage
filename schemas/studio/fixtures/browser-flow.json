@@ -1047,5 +1047,277 @@
       "previous_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
       "status": "prepared"
     }
+  },
+  {
+    "name": "owned-internal-task",
+    "schema": "TaskRecord",
+    "value": {
+      "task_id": "task-a",
+      "project_id": "lighthouse-a",
+      "run_id": "run-a",
+      "version": 1,
+      "state": "queued",
+      "request": {
+        "brief": "Explain how a lighthouse works",
+        "profile_id": "xvan",
+        "duration_seconds": 30,
+        "aspect_ratio": "16:9",
+        "narration": false,
+        "budget_usd_micros": 10000000
+      },
+      "config_snapshot": {
+        "profile_id": "xvan",
+        "provider": "xvan",
+        "model": "gpt-5.6-sol",
+        "api": "openai-responses",
+        "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "media_configuration_sha256": null,
+        "budget_usd_micros": 10000000,
+        "single_action_approval_usd_micros": 500000,
+        "max_output_tokens": 16384,
+        "max_turns": 100,
+        "task_timeout_seconds": 3600,
+        "media_models": {},
+        "price_status": "unquoted"
+      },
+      "current_stage": null,
+      "approval": null,
+      "cost": {
+        "currency": "USD",
+        "budget_usd_micros": 10000000,
+        "reserved_usd_micros": 0,
+        "spent_usd_micros": 0,
+        "unknown_call_count": 0,
+        "price_status": "unquoted"
+      },
+      "error": null,
+      "result": null,
+      "created_at": "2026-10-09T00:00:00Z",
+      "updated_at": null,
+      "ownership": {
+        "workspace": {
+          "kind": "personal",
+          "owner_id": "user-a"
+        },
+        "creator": {
+          "user_id": "user-a",
+          "issuer": "https://identity.example.test/oidc",
+          "sub": "subject-a"
+        }
+      },
+      "actor": {
+        "identity": {
+          "user_id": "user-a",
+          "issuer": "https://identity.example.test/oidc",
+          "sub": "subject-a"
+        },
+        "workspace": {
+          "kind": "personal",
+          "owner_id": "user-a"
+        }
+      }
+    }
+  },
+  {
+    "name": "owned-public-task",
+    "schema": "PublicTaskRecord",
+    "value": {
+      "task_id": "task-a",
+      "project_id": "lighthouse-a",
+      "run_id": "run-a",
+      "version": 1,
+      "state": "queued",
+      "request": {
+        "brief": "Explain how a lighthouse works",
+        "profile_id": "xvan",
+        "duration_seconds": 30,
+        "aspect_ratio": "16:9",
+        "narration": false,
+        "budget_usd_micros": 10000000
+      },
+      "config_snapshot": {
+        "profile_id": "xvan",
+        "provider": "xvan",
+        "model": "gpt-5.6-sol",
+        "api": "openai-responses",
+        "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "media_configuration_sha256": null,
+        "budget_usd_micros": 10000000,
+        "single_action_approval_usd_micros": 500000,
+        "max_output_tokens": 16384,
+        "max_turns": 100,
+        "task_timeout_seconds": 3600,
+        "media_models": {},
+        "price_status": "unquoted"
+      },
+      "current_stage": null,
+      "approval": null,
+      "cost": {
+        "currency": "USD",
+        "budget_usd_micros": 10000000,
+        "reserved_usd_micros": 0,
+        "spent_usd_micros": 0,
+        "unknown_call_count": 0,
+        "price_status": "unquoted"
+      },
+      "error": null,
+      "result": null,
+      "created_at": "2026-10-09T00:00:00Z",
+      "updated_at": null,
+      "ownership": {
+        "workspace": {
+          "kind": "personal",
+          "owner_id": "user-a"
+        },
+        "creator": {
+          "user_id": "user-a"
+        }
+      },
+      "actor": {
+        "user_id": "user-a",
+        "workspace": {
+          "kind": "personal",
+          "owner_id": "user-a"
+        }
+      }
+    }
+  },
+  {
+    "name": "mapped-historical-internal-task",
+    "schema": "TaskRecord",
+    "value": {
+      "task_id": "task-a",
+      "project_id": "lighthouse-a",
+      "run_id": "run-a",
+      "version": 1,
+      "state": "queued",
+      "request": {
+        "brief": "Explain how a lighthouse works",
+        "profile_id": "xvan",
+        "duration_seconds": 30,
+        "aspect_ratio": "16:9",
+        "narration": false,
+        "budget_usd_micros": 10000000
+      },
+      "config_snapshot": {
+        "profile_id": "xvan",
+        "provider": "xvan",
+        "model": "gpt-5.6-sol",
+        "api": "openai-responses",
+        "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "media_configuration_sha256": null,
+        "budget_usd_micros": 10000000,
+        "single_action_approval_usd_micros": 500000,
+        "max_output_tokens": 16384,
+        "max_turns": 100,
+        "task_timeout_seconds": 3600,
+        "media_models": {},
+        "price_status": "unquoted"
+      },
+      "current_stage": null,
+      "approval": null,
+      "cost": {
+        "currency": "USD",
+        "budget_usd_micros": 10000000,
+        "reserved_usd_micros": 0,
+        "spent_usd_micros": 0,
+        "unknown_call_count": 0,
+        "price_status": "unquoted"
+      },
+      "error": null,
+      "result": null,
+      "created_at": "2026-10-09T00:00:00Z",
+      "updated_at": null,
+      "ownership": {
+        "workspace": {
+          "kind": "personal",
+          "owner_id": "user-a"
+        },
+        "creator": {
+          "user_id": "user-a",
+          "issuer": "https://identity.example.test/oidc",
+          "sub": "subject-a"
+        }
+      },
+      "actor": null
+    }
+  },
+  {
+    "name": "mapped-historical-public-task",
+    "schema": "PublicTaskRecord",
+    "value": {
+      "task_id": "task-a",
+      "project_id": "lighthouse-a",
+      "run_id": "run-a",
+      "version": 1,
+      "state": "queued",
+      "request": {
+        "brief": "Explain how a lighthouse works",
+        "profile_id": "xvan",
+        "duration_seconds": 30,
+        "aspect_ratio": "16:9",
+        "narration": false,
+        "budget_usd_micros": 10000000
+      },
+      "config_snapshot": {
+        "profile_id": "xvan",
+        "provider": "xvan",
+        "model": "gpt-5.6-sol",
+        "api": "openai-responses",
+        "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "media_configuration_sha256": null,
+        "budget_usd_micros": 10000000,
+        "single_action_approval_usd_micros": 500000,
+        "max_output_tokens": 16384,
+        "max_turns": 100,
+        "task_timeout_seconds": 3600,
+        "media_models": {},
+        "price_status": "unquoted"
+      },
+      "current_stage": null,
+      "approval": null,
+      "cost": {
+        "currency": "USD",
+        "budget_usd_micros": 10000000,
+        "reserved_usd_micros": 0,
+        "spent_usd_micros": 0,
+        "unknown_call_count": 0,
+        "price_status": "unquoted"
+      },
+      "error": null,
+      "result": null,
+      "created_at": "2026-10-09T00:00:00Z",
+      "updated_at": null,
+      "ownership": {
+        "workspace": {
+          "kind": "personal",
+          "owner_id": "user-a"
+        },
+        "creator": {
+          "user_id": "user-a"
+        }
+      },
+      "actor": null
+    }
+  },
+  {
+    "name": "auth-context-empty-role",
+    "schema": "AuthContext",
+    "value": {
+      "identity": {
+        "user_id": "user-a",
+        "issuer": "https://identity.example.test/oidc",
+        "sub": "subject-a"
+      },
+      "workspace": {
+        "kind": "personal",
+        "owner_id": "user-a"
+      },
+      "role": null,
+      "permissions": [],
+      "context_id": "fixed-unpredictable-test-context",
+      "session_ref": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "authority_verified_at": "2026-10-12T00:00:00Z"
+    }
   }
 ]
