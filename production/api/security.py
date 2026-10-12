@@ -111,7 +111,8 @@ def install_boundary(app, *, config, projects_dir):
     logging.getLogger("uvicorn.access").addFilter(RedactAccessQuery())
 
     statuses = {"unauthenticated": 401, "forbidden": 403, "csrf_invalid": 403, "not_found": 404,
-                "auth_context_conflict": 409, "state_conflict": 409, "identity_unavailable": 503,
+                "auth_context_conflict": 409, "state_conflict": 409, "invitation_invalid": 409, "last_admin": 409,
+                "identity_unavailable": 503,
                 "dependency_unavailable": 503}
 
     async def failure(request, error):
