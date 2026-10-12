@@ -5,7 +5,6 @@ from hashlib import sha256
 import json
 import os
 import shutil
-import shutil
 import subprocess
 import sys
 from uuid import uuid4
@@ -48,11 +47,15 @@ def test_replacing_entire_canonical_root_retains_external_protection(tmp_path):
     binding = str(uuid4())
     mark_authenticated(root, binding=binding)
     mark_authenticated(project, binding=binding, workspace={"kind": "personal", "owner_id": "user-a"})
+    witness, = root.parent.glob(WITNESS_PREFIX + "*.json")
+    classification = witness.read_bytes()
     shutil.rmtree(root)
     assert has_guard(root)
     project.mkdir(parents=True)
     canonical.write_bytes(original)
     assert has_guard(root)
+    assert not (root / MARKER).exists()
+    assert witness.read_bytes() == classification
     mark_authenticated(root, binding=binding)
     mark_authenticated(project, binding=binding, workspace={"kind": "personal", "owner_id": "user-a"})
     assert has_guard(project)
@@ -207,22 +210,3 @@ def test_failed_internal_marker_write_retains_external_protection(tmp_path, monk
     before = witness.read_bytes()
     mark_authenticated(root, binding=binding)
     assert (root / MARKER).read_bytes() == before == witness.read_bytes()
-
-
-def test_replacing_the_entire_canonical_directory_cannot_remove_parent_history(tmp_path):
-    root = tmp_path / "projects"
-    root.mkdir()
-    canonical = root / "project.json"
-    canonical.write_bytes(b'{"title":"Retained protected data"}\n')
-    original = canonical.read_bytes()
-    mark_authenticated(root, binding=str(uuid4()))
-    witness, = root.parent.glob(WITNESS_PREFIX + "*.json")
-    classification = witness.read_bytes()
-    shutil.rmtree(root)
-    assert has_guard(root)
-    root.mkdir()
-    canonical.write_bytes(original)
-    assert has_guard(root)
-    assert not (root / MARKER).exists()
-    assert canonical.read_bytes() == original
-    assert witness.read_bytes() == classification
