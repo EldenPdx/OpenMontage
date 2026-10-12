@@ -114,7 +114,9 @@ def install_boundary(app, *, config, projects_dir):
                 "auth_context_conflict": 409, "state_conflict": 409, "identity_unavailable": 503,
                 "dependency_unavailable": 503}
 
-    def failure(error):
+    async def failure(request, error):
+        if error.code not in statuses and local_contract_error is not None:
+            return await local_contract_error(request, error)
         return error_response(error.code, str(error), statuses.get(error.code, 422))
 
     async def local_access():
@@ -142,7 +144,7 @@ def install_boundary(app, *, config, projects_dir):
     async def auth_error(request, error):
         if app.state.auth_mode == "local" and local_contract_error is not None:
             return await local_contract_error(request, error)
-        return failure(error)
+        return await failure(request, error)
 
     @app.exception_handler(RequestValidationError)
     async def auth_validation_error(request, error):
@@ -190,7 +192,7 @@ def install_boundary(app, *, config, projects_dir):
                         await policy(request, context)
             response = await call_next(request)
         except ContractViolation as error:
-            response = failure(error)
+            response = await failure(request, error)
             if error.code == "unauthenticated":
                 redirect = getattr(app.state, "auth_page_redirect", None)
                 if redirect is not None:
