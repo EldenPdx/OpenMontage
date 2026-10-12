@@ -37,7 +37,33 @@ def local_tag(service):
     return f"openmontage-auth/{service}:{pin['version']}-{pin['digest'][7:19]}"
 
 
+def native_platform(server):
+    platform = (server.get("Os"), server.get("Arch"))
+    if platform not in {("linux", "amd64"), ("linux", "arm64")}:
+        raise RuntimeError(f"Unsupported Docker engine platform {platform[0]}/{platform[1]}; require linux/amd64 or linux/arm64")
+    return platform
+
+
+def select_manifest(index, platform):
+    matches = [descriptor for descriptor in index["manifests"]
+               if (descriptor.get("platform", {}).get("os"), descriptor.get("platform", {}).get("architecture")) == platform]
+    if len(matches) != 1:
+        raise RuntimeError(f"Pinned image must have exactly one {platform[0]}/{platform[1]} manifest")
+    return matches[0]["digest"]
+
+
+def validate_manifest_config(manifest, config, platform):
+    if (config.get("os"), config.get("architecture")) != platform:
+        raise RuntimeError("Pinned image has the wrong platform")
+    if len(config["rootfs"]["diff_ids"]) != len(manifest["layers"]):
+        raise RuntimeError("Image layer count disagrees with its configuration")
+    for layer, diff_id in zip(manifest["layers"], config["rootfs"]["diff_ids"]):
+        if not all(re.fullmatch(r"sha256:[a-f0-9]{64}", digest) for digest in (layer["digest"], diff_id)):
+            raise RuntimeError("Invalid image layer descriptor")
+
+
 def stage_images(state):
+    platform = native_platform(json.loads(subprocess.check_output(["docker", "version", "--format", "{{json .Server}}"], text=True)))
     cache = Path(state) / "images"
     cache.mkdir(parents=True, exist_ok=True, mode=0o700)
     proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
@@ -98,17 +124,12 @@ def stage_images(state):
         index = json.loads(fetch("manifests", pin["digest"]).read_bytes())
         manifest_digest = pin["digest"]
         if "manifests" in index:
-            matches = [m for m in index["manifests"] if m.get("platform", {}).get("os") == "linux"
-                       and m.get("platform", {}).get("architecture") == "arm64"]
-            if len(matches) != 1:
-                raise RuntimeError("Pinned image must have one Linux ARM64 manifest")
-            manifest_digest = matches[0]["digest"]
+            manifest_digest = select_manifest(index, platform)
             index = json.loads(fetch("manifests", manifest_digest).read_bytes())
         config_digest = index["config"]["digest"]
         config_path = fetch("blobs", config_digest)
         config = json.loads(config_path.read_bytes())
-        if (config["os"], config["architecture"]) != ("linux", "arm64"):
-            raise RuntimeError("Pinned image has the wrong platform")
+        validate_manifest_config(index, config, platform)
         tag = local_tag(name)
         existing = subprocess.run(["docker", "image", "inspect", config_digest, "--format", "{{.Id}}"],
                                   capture_output=True, text=True)
@@ -120,8 +141,6 @@ def stage_images(state):
             shutil.copyfile(config_path, archive_dir / (config_digest[7:] + ".json"))
             layer_names = []
             diff_ids = config["rootfs"]["diff_ids"]
-            if len(diff_ids) != len(index["layers"]):
-                raise RuntimeError("Image layer count disagrees with its configuration")
             for layer, diff_id in zip(index["layers"], diff_ids):
                 blob = fetch("blobs", layer["digest"])
                 destination = archive_dir / (diff_id[7:] + ".tar")
@@ -148,6 +167,8 @@ def stage_images(state):
             archive.unlink()
             shutil.rmtree(archive_dir)
         inspected = json.loads(subprocess.check_output(["docker", "image", "inspect", tag], text=True))[0]
+        if (inspected["Os"], inspected["Architecture"]) != platform:
+            raise RuntimeError("Loaded image has the wrong platform")
         if inspected["RootFS"]["Layers"] != config["rootfs"]["diff_ids"]:
             raise RuntimeError("Loaded image layers disagree with the verified configuration")
         # Docker's containerd store uses manifest IDs; verify the exported raw config instead.
@@ -162,8 +183,8 @@ def stage_images(state):
         finally:
             exported.unlink(missing_ok=True)
         records[name] = {**pin, "platform_manifest": manifest_digest, "config_digest": config_digest,
-                         "image_id": inspected["Id"], "local_tag": tag}
-        print(f"Verified and staged {name} {pin['version']} (Linux ARM64)", flush=True)
+                         "image_id": inspected["Id"], "local_tag": tag, "platform": "/".join(platform)}
+        print(f"Verified and staged {name} {pin['version']} ({'/'.join(platform)})", flush=True)
     (cache / "loaded.json").write_text(json.dumps(records, indent=2) + "\n")
     return records
 
