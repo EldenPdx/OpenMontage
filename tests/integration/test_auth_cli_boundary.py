@@ -39,7 +39,7 @@ def test_cli_trusted_proxy_is_checked_against_the_actual_loopback_peer(tmp_path)
                 deadline = time.monotonic() + 10
                 while True:
                     try:
-                        ready = client.get(origin + "/api/health", headers={"Host": "studio.example"})
+                        ready = client.get(origin + "/api/health", headers={"Host": "studio.example", "X-Forwarded-Proto": "https"})
                         if ready.status_code == 200:
                             break
                     except httpx.HTTPError:
@@ -50,6 +50,7 @@ def test_cli_trusted_proxy_is_checked_against_the_actual_loopback_peer(tmp_path)
                     "X-Forwarded-Host": "studio.example", "X-Forwarded-For": "192.0.2.35"})
                 assert response.status_code == 200
                 assert response.json() == {"ok": True, "app": "backlot"}
+                assert client.get(origin + "/api/health", headers={"Host": "studio.example"}).status_code == 403
                 rejected = client.get(origin + "/api/health", headers={"Host": "studio.example", "X-Forwarded-Proto": "http",
                     "X-Forwarded-Host": "foreign.example", "X-Forwarded-For": "192.0.2.35"})
                 assert rejected.status_code == 403

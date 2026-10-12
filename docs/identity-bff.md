@@ -20,7 +20,7 @@ An authenticated configuration requires these fields:
 
 Optional `absolute_seconds` and `idle_seconds` can shorten the 24-hour absolute and 8-hour idle limits. They cannot disable expiry. `http_development: true` allows explicitly configured loopback HTTP URLs for isolated testing. `trusted_proxy_ips` contains exact administrator-approved physical proxy IP addresses, never client-provided addresses.
 
-Run Uvicorn with **`proxy_headers=False`**. The Backlot CLI already does this and binds `127.0.0.1`. A reverse proxy must preserve the configured Host and provide the matching `X-Forwarded-Proto`/`X-Forwarded-Host`; the BFF checks the original socket peer before trusting these headers. Arbitrary forwarding and non-loopback anonymous clients are rejected. Access query strings are redacted, and the CLI disables access logging.
+Run Uvicorn with **`proxy_headers=False`**. The Backlot CLI already does this and binds `127.0.0.1`. A reverse proxy must preserve the configured Host and provide the matching `X-Forwarded-Proto`/`X-Forwarded-Host`; the BFF checks the original socket peer before trusting these headers. Direct requests must use the configured origin scheme; an HTTP backend serving an HTTPS origin therefore requires the trusted proxy evidence. Arbitrary forwarding and non-loopback anonymous clients are rejected. Access query strings are redacted, and the CLI disables access logging.
 
 ## Root protection and local compatibility
 

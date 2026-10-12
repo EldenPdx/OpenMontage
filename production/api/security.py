@@ -173,7 +173,7 @@ def install_boundary(app, *, config, projects_dir):
                     return error_response("not_found", "Not found", 404)
                 if config is not None:
                     expected = urlsplit(config.origin)
-                    if host.lower() != expected.netloc.lower() or forwarded and (peer not in config.trusted_proxy_ips or
+                    if host.lower() != expected.netloc.lower() or (not forwarded and request.url.scheme != expected.scheme) or forwarded and (peer not in config.trusted_proxy_ips or
                         request.headers.get("x-forwarded-proto") != expected.scheme or request.headers.get("x-forwarded-host", host).lower() != expected.netloc.lower() or "forwarded" in request.headers):
                         raise ContractViolation("Trusted browser origin is required", "csrf_invalid")
                     if request.method not in {"GET", "HEAD", "OPTIONS"} and request.headers.get("origin") != config.origin:
