@@ -83,4 +83,6 @@ jobs:
           PY
 
       - name: Run test suite
+        env:
+          STUDIO_TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
         run: make test
