@@ -216,12 +216,14 @@ window.addEventListener("accountchange", (event) => { clearProtectedView(); me =
   announcement = event.detail.reason === "unavailable" ? "The account service is unavailable. Please try again." : null; render(); });
 window.addEventListener("accountready", () => { session().then((value) => {
   const changed = !me || authScope(me) !== authScope(value);
+  const displayChanged = changed || me?.role !== value?.role || me?.workspace?.name !== value?.workspace?.name
+    || JSON.stringify(me?.user) !== JSON.stringify(value?.user);
   if (changed && restorePage && !location.pathname.endsWith("/invitations/accept")) {
     restorePage = false;
     location.replace(localePath(location.pathname.includes("/studio") ? "/studio" : "/"));
     return;
   }
-  me = value; if (value?.mode === "authenticated") logoutSession = value; if (changed) render();
+  me = value; if (value?.mode === "authenticated") logoutSession = value; if (displayChanged) render();
   if (changed) loadOrganizations();
 }); });
 window.addEventListener("permissionschange", () => { if (!can("organization:manage")) { members = []; invitations = []; managementOpen = false; } render(); });

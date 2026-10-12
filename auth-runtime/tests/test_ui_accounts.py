@@ -488,3 +488,38 @@ def test_authority_recovery_focus_restores_studio_in_the_verified_context(ui_env
         expect(page.locator("#brief")).to_be_enabled()
         expect(page.locator("#create-task")).to_be_enabled()
         context.close()
+
+
+def test_same_context_role_refresh_updates_the_account_without_clearing_drafts(ui_environment):
+    fixture, repository = ui_environment
+    original = fixture.organization_roles("cross", "A")
+    try:
+        with ui_browser(repository) as (browser, _):
+            context = ui_context(browser)
+            page = sign_in(context, fixture, "cross", return_to="/en/studio")
+            page.get_by_label("Workspace", exact=True).select_option(fixture.organizations["A"])
+            expect(page.get_by_label("Workspace", exact=True)).to_have_value(fixture.organizations["A"])
+            expect(page.locator("#account-control .chip")).to_have_text("editor")
+            expect(page.locator("#create-task")).to_be_enabled()
+            me = context.request.get(ORIGIN + "/api/auth/me").json()
+            page.locator("#brief").fill("An organization draft retained across a role refresh")
+
+            fixture.set_roles("cross", "A", ["viewer"])
+            page.evaluate("window.dispatchEvent(new Event('focus'))")
+            expect(page.locator("#create-task")).to_be_disabled()
+            refreshed = context.request.get(ORIGIN + "/api/auth/me").json()
+            assert refreshed["role"] == "viewer" and refreshed["context_id"] == me["context_id"]
+            expect(page.locator("#account-control .chip")).to_have_text("viewer")
+            expect(page.locator("#brief")).to_have_value("An organization draft retained across a role refresh")
+            expect(page.get_by_label("Workspace", exact=True)).to_have_value(fixture.organizations["A"])
+
+            fixture.set_roles("cross", "A", original)
+            page.evaluate("window.dispatchEvent(new Event('focus'))")
+            expect(page.locator("#account-control .chip")).to_have_text("editor")
+            expect(page.locator("#create-task")).to_be_enabled()
+            expect(page.locator("#brief")).to_have_value("An organization draft retained across a role refresh")
+            assert context.request.get(ORIGIN + "/api/auth/me").json()["context_id"] == me["context_id"]
+            assert context.request.get(ORIGIN + "/api/studio/tasks").json() == []
+            context.close()
+    finally:
+        fixture.set_roles("cross", "A", original)
