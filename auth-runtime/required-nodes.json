@@ -173,6 +173,8 @@
         "tests/integration/test_identity_persistence.py::test_prepared_denial_releases_serialization_but_submitted_intent_cannot_be_rejected",
         "tests/integration/test_identity_persistence.py::test_member_completion_derives_target_session_invalidation",
         "tests/integration/test_identity_validation_cli.py::test_identity_bootstrap_help_documents_explicit_online_permission",
+        "tests/integration/test_identity_validation_cli.py::test_operator_lifecycle_has_explicit_original_vendor_seal_commands",
+        "tests/integration/test_identity_validation_cli.py::test_docker_nanosecond_startup_timestamp_is_preserved_as_a_utc_instant",
         "tests/integration/test_identity_validation_cli.py::test_required_identity_skip_is_failure_even_when_pytest_would_pass",
         "tests/integration/test_identity_validation_cli.py::test_required_identity_xfail_xpass_and_fixture_gaps_cannot_pass[xfail]",
         "tests/integration/test_identity_validation_cli.py::test_required_identity_xfail_xpass_and_fixture_gaps_cannot_pass[xpass]",

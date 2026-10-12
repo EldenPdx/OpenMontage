@@ -190,7 +190,8 @@ def dependency_failures():
 
 def phase(name, definition):
     environment = {**os.environ, "PYTHONPATH": os.pathsep.join((str(ROOT), str(ROOT / "auth-runtime"))),
-                   "STUDIO_REQUIRE_INTEGRATION": "1", "PYTHONDONTWRITEBYTECODE": "1", "PYTHON_DOTENV_DISABLED": "1"}
+                   "STUDIO_REQUIRE_INTEGRATION": "1", "PYTHONDONTWRITEBYTECODE": "1", "PYTHON_DOTENV_DISABLED": "1",
+                   "AUTH_SSO_VENDOR_ROOT": str(STATE / "sso-vendor")}
     for key in ("OPENMONTAGE_ALLOW_NETWORK", "STUDIO_XVAN_LIVE_SMOKE", "STUDIO_XVAN_PAID_APPROVED", "OPENMONTAGE_AUTH_CONFIG_FILE", "OPENMONTAGE_AUTH_MODE", "PYTEST_ADDOPTS"):
         environment.pop(key, None)
     namespace = definition.get("namespace")
@@ -356,6 +357,7 @@ def main():
         manage.assert_ownership()
         business_account()
         dependencies([*("library:" + package for package in PACKAGES), *DEPENDENCIES])
+        execute("native-runtime-provenance", [sys.executable, "-B", "auth-runtime/manage.py", "check"], timeout=60)
         private_json(EVIDENCE / "versions.json", {"python": platform.python_version(), "host": platform.system(), "architecture": platform.machine(),
                      "packages": {package: version(package) for package in PACKAGES},
                      "images": json.loads((STATE / "images/loaded.json").read_text())})

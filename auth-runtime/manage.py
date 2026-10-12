@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import subprocess
 import sys
@@ -132,10 +133,76 @@ def verify_images(*, online=False):
             raise RuntimeError("Staged identity image drifted; restage verified content")
 
 
+def prepare_sso():
+    """Original input comes from the verified base image, never the patched live container."""
+    from sso.overlay import BUNDLE, prepare as seal
+    records = json.loads((STATE / "images/loaded.json").read_text())
+    record = records["logto"]
+    inspected = json.loads(run(["docker", "image", "inspect", local_tag("logto")]))[0]
+    platform = (inspected["Os"], inspected["Architecture"])
+    if record.get("digest") != PINS["logto"]["digest"] or inspected["Id"] != record.get("image_id") or record.get("platform") != "/".join(platform):
+        raise RuntimeError("Original SSO image provenance is unavailable or drifted")
+    vendor = STATE / "sso-vendor"
+    required = (vendor / "packages/core/package.json", vendor / "packages/core/build" / BUNDLE)
+    if vendor.exists() and not all(path.is_file() for path in required):
+        raise RuntimeError("Original SSO vendor export is partial; inspect private state")
+    if not vendor.exists():
+        required[1].parent.mkdir(parents=True, mode=0o700)
+        container = run(["docker", "create", "--name", "openmontage-auth-export-" + secrets.token_hex(8),
+                         "--network", "none", "--entrypoint", "/bin/true", local_tag("logto")]).strip()
+        if not all(character in "0123456789abcdef" for character in container) or len(container) != 64:
+            raise RuntimeError("Original SSO export container was not created")
+        try:
+            for destination in required:
+                source = "/etc/logto/" + destination.relative_to(vendor).as_posix()
+                run(["docker", "cp", container + ":" + source, str(destination)])
+                destination.chmod(0o600)
+        finally:
+            run(["docker", "rm", container])
+    return seal(STATE, vendor, PINS["logto"], platform)
+
+
+def check_sso():
+    from sso.overlay import check as sealed_check
+    records = json.loads((STATE / "images/loaded.json").read_text())
+    platform = tuple(records["logto"]["platform"].split("/"))
+    return sealed_check(STATE, STATE / "sso-vendor", PINS["logto"], platform)
+
+
+def docker_started_at(value):
+    from datetime import datetime
+    normalized = re.sub(r"(\.\d{6})\d+(?=Z$)", r"\1", value)
+    return datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+
+
+def check_sso_runtime():
+    from datetime import datetime, timezone
+    import hashlib
+    manifest = check_sso()
+    container = json.loads(run(["docker", "inspect", PROJECT + "-logto-1"]))[0]
+    expected_image = json.loads((STATE / "images/loaded.json").read_text())["logto"]["image_id"]
+    if container["Image"] != expected_image or not container["State"]["Running"] or container["State"]["Paused"]:
+        raise RuntimeError("Required SSO authority image/runtime is unavailable")
+    mounts = {item["Destination"]: item for item in container["Mounts"]}
+    started = docker_started_at(container["State"]["StartedAt"])
+    for expected in manifest["mounts"]:
+        mount = mounts.get(expected["target"])
+        if not mount or mount.get("RW") or mount.get("Type") != "bind" or mount.get("Source") != expected["source"]:
+            raise RuntimeError("Required SSO read-only policy mount differs")
+        if datetime.fromtimestamp(Path(expected["source"]).stat().st_mtime, timezone.utc) > started:
+            raise RuntimeError("SSO policy changed after authority startup; explicit restart required")
+        script = "const fs=require('node:fs'),crypto=require('node:crypto');process.stdout.write(crypto.createHash('sha256').update(fs.readFileSync(process.argv[1])).digest('hex'))"
+        actual = run(["docker", "exec", container["Id"], "node", "-e", script, expected["target"]]).strip()
+        if actual != hashlib.sha256(Path(expected["source"]).read_bytes()).hexdigest():
+            raise RuntimeError("Required SSO runtime policy bytes differ")
+    print("SSO policy seal, base image and read-only runtime bytes match; required behavior checks remain separate")
+
+
 def up(*, online=False):
     credentials = prepare()
     assert_ownership()
     verify_images(online=online)
+    prepare_sso()
     compose("up", "--detach", "--wait", "--wait-timeout", "120", "--pull", "never", "--no-build", "identity-postgres")
     initialize_databases(credentials)
     compose("up", "--detach", "--wait", "--wait-timeout", "240", "--pull", "never", "--no-build", "keycloak", "mailpit", timeout=300)
@@ -151,6 +218,7 @@ def up(*, online=False):
 
 def check():
     assert_ownership()
+    check_sso_runtime()
     credentials = json.loads((STATE / "credentials.json").read_text())
     from importlib.metadata import version
     for package, expected in (("logto", "0.2.1"), ("cryptography", "50.0.2"), ("httpx", "0.28.1"), ("psycopg", "3.3.6")):
@@ -177,7 +245,7 @@ def check():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "images", "up", "check", "seed", "cleanup", "restart", "stop", "down"))
+    parser.add_argument("command", choices=("prepare", "images", "sso-prepare", "sso-check", "up", "check", "seed", "cleanup", "restart", "stop", "down"))
     parser.add_argument("--namespace", default="auth24")
     parser.add_argument("--app-origin", default="http://127.0.0.1:4760")
     parser.add_argument("--online", action="store_true", help="Allow uncached image downloads; default is offline without a process proxy")
@@ -189,6 +257,16 @@ def main():
     elif command == "images":
         prepare()
         stage_images(STATE, online=args.online)
+    elif command == "sso-prepare":
+        prepare()
+        assert_ownership()
+        verify_images(online=args.online)
+        prepare_sso()
+        print("Original pinned vendor exported and SSO policy sealed; runtime behavior is not signed off")
+    elif command == "sso-check":
+        assert_ownership()
+        check_sso()
+        print("SSO policy structural check passed; runtime behavior is not signed off")
     elif command == "up":
         up(online=args.online)
     elif command == "check":

@@ -27,6 +27,20 @@ def test_identity_bootstrap_help_documents_explicit_online_permission(tmp_path):
     assert "offline" in result.stdout
 
 
+def test_operator_lifecycle_has_explicit_original_vendor_seal_commands():
+    result = subprocess.run([sys.executable, "-B", "auth-runtime/manage.py", "--help"], cwd=ROOT,
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0
+    assert "sso-prepare" in result.stdout and "sso-check" in result.stdout
+
+
+def test_docker_nanosecond_startup_timestamp_is_preserved_as_a_utc_instant():
+    script = "import sys;sys.path.insert(0,'auth-runtime');import manage;print(manage.docker_started_at('2026-10-12T20:23:34.123456789Z').isoformat())"
+    result = subprocess.run([sys.executable, "-B", "-c", script], cwd=ROOT, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0
+    assert result.stdout.strip() == "2026-10-12T20:23:34.123456+00:00"
+
+
 def run_required(tmp_path, body, *, nodes=None, extra=()):
     (tmp_path / "test_input.py").write_text(body)
     (tmp_path / "required.json").write_text(json.dumps({"nodes": nodes or ["test_input.py::test_required"]}))

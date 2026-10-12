@@ -4,6 +4,16 @@ Developer/operator runbook for the free Logto OSS baseline in [#24](https://gith
 
 **Owner evidence, 2026-10-12:** the realm-ownership fix passed **16 required real environment checks, zero skips, in 41.04s**, including rejection and retention of a deliberately foreign-marked realm. Independent review of the preceding `b0a8a1a` candidate withheld signoff because initialization could adopt that realm and let cleanup delete it; that adoption path has now been removed. Native login, verified registration/reset, invitation SMTP, OIDC and signed SAML, privilege denials, owned repeat initialization, restart persistence and scoped cleanup passed again after the fix. Earlier owner/reviewer runs also passed 28 existing contract tests and CLI/Pi/preservation checks. Native-platform staging has separate checks described below. Independent reproduction on the new final SHA and target-main CI remain acceptance gates; these owner results do not close #24 or validate production BFF authorization.
 
+## Sealed enterprise policy and cold CI
+
+The current lifecycle prepares the pinned enterprise policy before any service startup. It creates one temporary, unstarted, network-isolated container from the already verified original Logto image, exports the original core package/version and bundle into private `.state/sso-vendor`, and removes only that export container. It never treats a patched running-container file as original vendor evidence. Version/hash/platform drift and partial exports stop preparation. The overlay owner supplies the actual `prepare`/`check` implementation; original SHA-256 and immutable image provenance remain fixed.
+
+The Logto service requires two exact read-only bind mounts from `.state/sso`, with host-path auto-creation disabled. The native seed container remains the original factory image. `up` generates/checks the seal before Compose; `check` separately verifies the actual image, running/unpaused state, mount sources/targets, container-visible file hashes and preparation before startup. Changed files require an explicit owner restart. Seal/mount checks describe runtime provenance; successful standard protocol and independently calibrated denial cases provide the behavioral acceptance.
+
+Use `auth-runtime/manage.py sso-prepare` to export and seal, and `sso-check` for a structural operator check from the actual lifecycle-owner checkout. `check` includes the running authority checks. Cold CI calls `bootstrap.py --online up`; explicit permission allows direct cold dependency/image downloads while the default remains offline without an operator process proxy. `AUTH_SSO_VENDOR_ROOT` in dedicated tests points to the separately staged original export. No private handoff path, live patched file or skipped required case can substitute for the cold input or native behavior.
+
+Formal #30/#32 acceptance remains gated on the complete signed-claim/cancel/outage cases, portable subject-proof/member setup, independent review and actual AMD64/main required CI. Partial policy checkpoints are not final signoff.
+
 ## Versions and prerequisites
 
 `auth-runtime/images.lock.json` is the image authority. Its current pins are:
