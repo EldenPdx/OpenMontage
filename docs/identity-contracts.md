@@ -10,7 +10,7 @@ Authority: [#22](https://github.com/EldenPdx/OpenMontage/issues/22) and [#23](ht
 | WorkspaceContext | `kind: personal\|organization`, `owner_id`; personal owner is local user_id, organization owner is authoritative Logto organization_id; canonical key is `personal:<user_id>` or `organization:<organization_id>` | Selected workspace key/kind/id/name |
 | ResourceOwnership | `workspace`, `creator: UserIdentity`; immutable for accepted tasks/projects; null means unassigned historical resource | Only within authorized resource DTOs |
 | Actor | `identity: UserIdentity`, `workspace: WorkspaceContext`; captured on acceptance, never supplied in a request body | Safe actor user_id/workspace in authorized operation evidence |
-| AuthContext | `identity`, `workspace`, `role: admin\|editor\|viewer\|personal`, `permissions`, `context_id`, `session_ref`, authority verification timestamp | Only safe identity/workspace/role/permissions/context_id projection |
+| AuthContext | `identity`, `workspace`, `role: admin\|editor\|viewer\|personal\|null` (highest recognized display role, null if none), `permissions` (recognized role union), `context_id`, `session_ref`, authority verification timestamp | Only safe identity/workspace/role/permissions/context_id projection |
 | AuthSession | hash of random session identifier; authenticated identity, selected workspace, context_id, CSRF hash, absolute/idle expiration, revoked state; encrypted SDK storage and one-time interactions | Opaque cookie and CSRF/context values only |
 
 Use one selected workspace per session. Membership in another organization does not authorize its resources while a different workspace is selected. Workspace selection verifies membership with the authority before committing. A fresh login selects personal space unless an explicitly allowed organization hint is verified; no first-organization or email-domain default. Organization permissions are resolved from the authoritative organization template, never from browser roles or stale token claims alone.
@@ -76,7 +76,7 @@ All list cursors bind endpoint, actor and workspace; cross-context or invalid cu
 
 ## Existing public entry points and authorization order
 
-For every protected request: validate trusted Host/Origin → validate session/context → verify authority and selected workspace/capability → verify resource ownership → perform scoped replay/version/state work → read/commit/send. Invalid or unauthenticated requests never execute business work. A valid member without a capability gets 403; a non-owned/foreign/unassigned resource gets uniform 404 before task/gate state, file existence, replay conflict, content length, ETag or Range are exposed.
+For every protected request: validate trusted Host/Origin → validate session/context → verify authority and selected workspace membership. For a resource-addressed request, next perform a minimal scoped ownership/existence lookup (foreign/unassigned/absent target → uniform 404), then verify the operation capability (owned target but insufficient permission → 403), then perform scoped replay/version/state work and read/commit/send. Creation/list/config requests check their capability before any business work. Invalid or unauthenticated requests never execute business work. Ownership denial precedes task/gate state, file existence, replay conflict, content length, ETag or Range disclosure. An org-A viewer cancelling an A task gets 403; the same viewer cancelling a B/absent task gets 404.
 
 | Entry points (all aliases share policy) | Requirement | Acceptance scenarios / owner |
 | --- | --- | --- |
@@ -155,7 +155,7 @@ Test seams already approved in #22/#23: real browser and public HTTP APIs; limit
 | Dataset/scenario | Required observations | Primary Issues |
 | --- | --- | --- |
 | Signed out; independent personal U1/U2; organizations A/B; one user in A+B | identity/workspace explicitly verified; 401/403/404 distinctions; all endpoint/list/metadata isolation | #26–#32 |
-| A admin/editor/viewer and B admin; removed/disabled member | role matrix, spoofed owner/actor/organization rejected, last-admin serialized protection; no gateway/command/cost side effects on denial | #25–#32 |
+| A admin/editor/viewer and B admin; removed/disabled member | role matrix, viewer-owned write 403 vs viewer-foreign/absent write 404; spoofed owner/actor/organization rejected, last-admin serialized protection; no gateway/command/cost side effects on denial | #25–#32 |
 | Real registration/login/reset/logout/refresh/restart; concurrent U1/U2 | verified issuer/sub; one-time state/nonce/PKCE checks, cookie rotation, encrypted persistent isolated SDK state | #24–#26, #31–#32 |
 | Wrong/replayed state/nonce/issuer/audience/signature/expiry, return URL/Host/Origin/CSRF | request rejected through public callback/API; no partial authenticated session or leaked secrets | #26, #30, #32 |
 | Create organization → invite → local mail → intended verified identity accepts → role change → remove | real authoritative memberships/roles; wrong email/expired/cancelled/replayed ticket denied; duplicate key and lost-response restart cause no duplicates | #24, #27, #31–#32 |
