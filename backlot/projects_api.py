@@ -18,6 +18,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 
+from backlot.access import ProjectFileResponse, file_headers, media_target, refresh_access, visible_project
 from backlot.state import PROJECTS_DIR, REPO_ROOT, list_projects, load_board_state, summarize_project
 
 UI_DIR = Path(__file__).resolve().parent / "ui"
@@ -85,11 +86,13 @@ def _invalidate_summary(project_id: str) -> None:
     _summary_cache.pop(project_id, None)
 
 
-def _cached_summaries() -> list[dict]:
+def _cached_summaries(project_ids=None) -> list[dict]:
     if not PROJECTS_DIR.is_dir():
         return []
     summaries = []
     for entry in sorted(PROJECTS_DIR.iterdir()):
+        if project_ids is not None and (entry.name not in project_ids or entry.is_symlink()):
+            continue
         if not entry.is_dir() or entry.name.startswith(("_", ".")):
             continue
         cached = _summary_cache.get(entry.name)
@@ -166,22 +169,28 @@ async def lifespan(app: FastAPI):
 
 
 def mount_projects(app: FastAPI):
+    from backlot.access import install_access
+    install_access(app)
+
     @app.get("/api/projects")
-    async def projects() -> list:
-        return await asyncio.to_thread(_cached_summaries)
+    async def projects(request: Request) -> list:
+        return await asyncio.to_thread(_cached_summaries, getattr(request.state, "project_ids", None))
 
     @app.get("/api/project/{project_id}/state")
-    async def project_state(project_id: str) -> dict:
-        project_dir = _safe_project_dir(project_id)
+    async def project_state(project_id: str, request: Request) -> dict:
+        project_dir = _safe_project_dir(project_id, authenticated=request.app.state.auth_mode != "local")
         return await asyncio.to_thread(load_board_state, project_dir)
 
     @app.get("/api/project/{project_id}/events")
     async def project_events(project_id: str, request: Request) -> StreamingResponse:
-        _safe_project_dir(project_id)  # 404 early for unknown projects
+        _safe_project_dir(project_id, authenticated=request.app.state.auth_mode != "local")
+        context = getattr(request.state, "auth_context", None)
+        context_id = context.context_id if context is not None else None
 
         async def stream():
             q = hub.subscribe(project_id)
             try:
+                await refresh_access(request, context_id, project_id)
                 yield _sse({"type": "hello", "project_id": project_id})
                 while True:
                     if await request.is_disconnected():
@@ -189,6 +198,7 @@ def mount_projects(app: FastAPI):
                     try:
                         await asyncio.wait_for(q.get(), timeout=SSE_HEARTBEAT_SECONDS)
                     except asyncio.TimeoutError:
+                        await refresh_access(request, context_id, project_id)
                         yield _sse({"type": "heartbeat", "ts": time.time()})
                         continue
                     # Coalesce bursts: drain anything else queued.
@@ -197,7 +207,10 @@ def mount_projects(app: FastAPI):
                             q.get_nowait()
                         except asyncio.QueueEmpty:
                             break
+                    await refresh_access(request, context_id, project_id)
                     yield _sse({"type": "change", "project_id": project_id})
+            except Exception:
+                return
             finally:
                 hub.unsubscribe(q)
 
@@ -208,9 +221,13 @@ def mount_projects(app: FastAPI):
 
     @app.get("/api/library/events")
     async def library_events(request: Request) -> StreamingResponse:
+        context = getattr(request.state, "auth_context", None)
+        context_id = context.context_id if context is not None else None
+
         async def stream():
             q = hub.subscribe()
             try:
+                await refresh_access(request, context_id)
                 yield _sse({"type": "hello"})
                 while True:
                     if await request.is_disconnected():
@@ -218,14 +235,21 @@ def mount_projects(app: FastAPI):
                     try:
                         changed = await asyncio.wait_for(q.get(), timeout=SSE_HEARTBEAT_SECONDS)
                     except asyncio.TimeoutError:
+                        await refresh_access(request, context_id)
                         yield _sse({"type": "heartbeat", "ts": time.time()})
                         continue
+                    changed_ids = {changed}
                     while not q.empty():
                         try:
-                            q.get_nowait()
+                            changed_ids.add(q.get_nowait())
                         except asyncio.QueueEmpty:
                             break
-                    yield _sse({"type": "change", "project_id": changed})
+                    for changed in sorted(changed_ids):
+                        current = await refresh_access(request, context_id)
+                        if await visible_project(request, current, changed):
+                            yield _sse({"type": "change", "project_id": changed})
+            except Exception:
+                return
             finally:
                 hub.unsubscribe(q)
 
@@ -237,15 +261,9 @@ def mount_projects(app: FastAPI):
     # ---- Thumbnails (downscaled, cached on disk) ------------------------
 
     @app.get("/thumb/{project_id}/{file_path:path}")
-    async def thumb(project_id: str, file_path: str, w: int = 640) -> FileResponse:
-        project_dir = _safe_project_dir(project_id)
-        target = (project_dir / file_path).resolve()
-        try:
-            target.relative_to(project_dir.resolve())
-        except ValueError:
-            raise HTTPException(status_code=403, detail="path escapes project")
-        if not target.is_file():
-            raise HTTPException(status_code=404, detail="media not found")
+    async def thumb(project_id: str, file_path: str, request: Request, w: int = 640) -> FileResponse:
+        project_dir = _safe_project_dir(project_id, authenticated=request.app.state.auth_mode != "local")
+        target = media_target(project_dir, file_path)
         width = min(THUMB_WIDTHS, key=lambda x: abs(x - w))
         cached = await asyncio.to_thread(_thumbnail_for, target, width)
         if cached is None:
@@ -253,25 +271,16 @@ def mount_projects(app: FastAPI):
             # non-thumbable images are safe to serve as-is.
             if target.suffix.lower() in {".mp4", ".webm", ".mov"}:
                 raise HTTPException(status_code=404, detail="no poster frame available")
-            return FileResponse(target)
-        return FileResponse(cached, media_type="image/jpeg")
+            return ProjectFileResponse(target, request=request, project_id=project_id, headers=file_headers(target))
+        return ProjectFileResponse(cached, request=request, project_id=project_id, media_type="image/jpeg", headers=file_headers(cached))
 
     # ---- Media (range requests handled by FileResponse) ---------------
 
     @app.get("/media/{project_id}/{file_path:path}")
-    async def media(project_id: str, file_path: str) -> FileResponse:
-        project_dir = _safe_project_dir(project_id)
-        target = (project_dir / file_path).resolve()
-        try:
-            target.relative_to(project_dir.resolve())
-        except ValueError:
-            raise HTTPException(status_code=403, detail="path escapes project")
-        if not target.is_file():
-            raise HTTPException(status_code=404, detail="media not found")
-        headers = {"X-Content-Type-Options": "nosniff"}
-        if target.suffix.lower() in {".html", ".htm", ".svg", ".xhtml"}:
-            headers["Content-Security-Policy"] = "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'"
-        return FileResponse(target, headers=headers)
+    async def media(project_id: str, file_path: str, request: Request) -> FileResponse:
+        project_dir = _safe_project_dir(project_id, authenticated=request.app.state.auth_mode != "local")
+        target = media_target(project_dir, file_path)
+        return ProjectFileResponse(target, request=request, project_id=project_id, headers=file_headers(target))
 
     # ---- UI ------------------------------------------------------------
 
@@ -300,12 +309,14 @@ def mount_projects(app: FastAPI):
 
 
 
-def _safe_project_dir(project_id: str) -> Path:
+def _safe_project_dir(project_id: str, *, authenticated=False) -> Path:
     # ':' rejects Windows drive-relative ids like "C:" (PROJECTS_DIR / "C:"
     # collapses back to PROJECTS_DIR itself).
     if any(c in project_id for c in "/\\:") or project_id in (".", ".."):
         raise HTTPException(status_code=400, detail="invalid project id")
     project_dir = PROJECTS_DIR / project_id
+    if authenticated and project_dir.is_symlink():
+        raise HTTPException(status_code=404, detail="project not found")
     if not project_dir.resolve().is_relative_to(PROJECTS_DIR.resolve()):
         raise HTTPException(status_code=403, detail="project escapes managed root")
     if not project_dir.is_dir():

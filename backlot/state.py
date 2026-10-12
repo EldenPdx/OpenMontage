@@ -13,6 +13,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
 
+from backlot.access import private_path
 from lib.events import read_events
 from lib.paths import PROJECTS_DIR, REPO_ROOT  # single source of truth (env-overridable)
 
@@ -38,8 +39,18 @@ LIVE_WINDOW_SECONDS = 5 * 60
 STALL_WINDOW_SECONDS = 10 * 60
 
 
-def _read_json(path: Path) -> Optional[dict]:
+def _inside_project(project_dir: Path, path: Path) -> bool:
+    try:
+        relative = path.resolve().relative_to(project_dir.resolve())
+        return not private_path(relative) and not private_path(path.relative_to(project_dir))
+    except (ValueError, OSError, RuntimeError):
+        return False
+
+
+def _read_json(path: Path, project_dir: Optional[Path] = None) -> Optional[dict]:
     """Read a JSON file, returning None on any failure."""
+    if project_dir is not None and not _inside_project(project_dir, path):
+        return None
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
             data = json.load(f)
@@ -63,7 +74,7 @@ def _rel(project_dir: Path, path: Path) -> str:
 @lru_cache(maxsize=32)
 def _load_pipeline_meta(pipeline_type: Optional[str]) -> dict[str, Any]:
     """Stage order + gate flags from the manifest; graceful fallback."""
-    if pipeline_type and pipeline_type != "unknown":
+    if isinstance(pipeline_type, str) and re.fullmatch(r"[A-Za-z0-9_-]+", pipeline_type) and pipeline_type != "unknown":
         try:
             from lib.pipeline_loader import load_pipeline
             manifest = load_pipeline(pipeline_type)
@@ -111,7 +122,7 @@ def _resolve_artifact(project_dir: Path, value: Any) -> Optional[dict]:
             p.resolve().relative_to(Path(project_dir).resolve())
         except (ValueError, OSError):
             return None
-        return _read_json(p)
+        return _read_json(p, project_dir)
     return None
 
 
@@ -120,7 +131,7 @@ def _collect_checkpoints(project_dir: Path) -> dict[str, dict]:
     out: dict[str, dict] = {}
     for path in sorted(project_dir.glob("checkpoint_*.json")):
         stage = path.stem[len("checkpoint_"):]
-        data = _read_json(path)
+        data = _read_json(path, project_dir)
         if data is not None:
             data["_mtime"] = path.stat().st_mtime
             out[stage] = data
@@ -131,12 +142,12 @@ def _collect_history(project_dir: Path) -> dict[str, list[dict]]:
     """Archived checkpoint versions per stage (oldest first)."""
     history_dir = project_dir / "history"
     out: dict[str, list[dict]] = {}
-    if not history_dir.is_dir():
+    if not _inside_project(project_dir, history_dir) or not history_dir.is_dir():
         return out
     for path in sorted(history_dir.glob("checkpoint_*.json")):
         m = re.match(r"checkpoint_(.+?)_\d", path.stem)
         stage = m.group(1) if m else path.stem[len("checkpoint_"):]
-        data = _read_json(path)
+        data = _read_json(path, project_dir)
         if data is not None:
             out.setdefault(stage, []).append(data)
     return out
@@ -248,12 +259,12 @@ def _collect_artifacts(project_dir: Path, checkpoints: dict[str, dict]) -> dict[
     artifacts: dict[str, dict] = {}
     art_dir = project_dir / "artifacts"
     for name, filename in ARTIFACT_FILES.items():
-        data = _read_json(art_dir / filename)
+        data = _read_json(art_dir / filename, project_dir)
         if data is not None:
             artifacts[name] = data
     # decision_log historically also lives at project root
     if "decision_log" not in artifacts:
-        data = _read_json(project_dir / "decision_log.json")
+        data = _read_json(project_dir / "decision_log.json", project_dir)
         if data is not None:
             artifacts["decision_log"] = data
     # Backfill from checkpoint-embedded artifacts.
@@ -291,7 +302,7 @@ def _resolve_asset_path(project_dir: Path, raw_path: str) -> Optional[Path]:
             candidates.append(project_dir.parent / Path(*parts[1:]))
     for c in candidates:
         try:
-            if c.is_file():
+            if _inside_project(project_dir, c) and c.is_file():
                 return c
         except OSError:
             continue
@@ -356,11 +367,11 @@ def _find_scene_snapshot(project_dir: Path, scene_id: str) -> Optional[dict]:
     shows. Accept exact `<scene_id>.<ext>` and `<scene_id>_*.<ext>` forms.
     """
     snap_dir = project_dir / "snapshots"
-    if not scene_id or not snap_dir.is_dir():
+    if not scene_id or not _inside_project(project_dir, snap_dir) or not snap_dir.is_dir():
         return None
     try:
         for f in sorted(snap_dir.iterdir()):
-            if not f.is_file() or f.suffix.lower() not in MEDIA_IMAGE_EXT:
+            if not _inside_project(project_dir, f) or not f.is_file() or f.suffix.lower() not in MEDIA_IMAGE_EXT:
                 continue
             stem = f.stem
             if stem == scene_id or stem.startswith(f"{scene_id}_"):
@@ -506,28 +517,32 @@ def _scan_media(project_dir: Path) -> dict[str, list[dict]]:
     music: list[dict] = []
 
     renders_dir = project_dir / "renders"
-    if renders_dir.is_dir():
+    if _inside_project(project_dir, renders_dir) and renders_dir.is_dir():
         for f in sorted(renders_dir.iterdir()):
-            if f.suffix.lower() in MEDIA_VIDEO_EXT and f.is_file():
+            if f.suffix.lower() in MEDIA_VIDEO_EXT and _inside_project(project_dir, f) and f.is_file():
                 renders.append({"path": _rel(project_dir, f), "size": f.stat().st_size,
                                 "mtime": f.stat().st_mtime})
     # Atelier heuristic: deliverables at project root.
     for f in sorted(project_dir.glob("*.mp4")):
+        if not _inside_project(project_dir, f) or not f.is_file():
+            continue
         renders.append({"path": _rel(project_dir, f), "size": f.stat().st_size,
                         "mtime": f.stat().st_mtime, "at_root": True})
     for f in sorted(project_dir.glob("*.mp3")):
+        if not _inside_project(project_dir, f) or not f.is_file():
+            continue
         music.append({"path": _rel(project_dir, f), "at_root": True})
     music_dir = project_dir / "assets" / "music"
-    if music_dir.is_dir():
+    if _inside_project(project_dir, music_dir) and music_dir.is_dir():
         for f in sorted(music_dir.iterdir()):
-            if f.suffix.lower() in MEDIA_AUDIO_EXT:
+            if f.suffix.lower() in MEDIA_AUDIO_EXT and _inside_project(project_dir, f) and f.is_file():
                 music.append({"path": _rel(project_dir, f)})
 
     for dirname in ("snapshots", "verify"):
         d = project_dir / dirname
-        if d.is_dir():
+        if _inside_project(project_dir, d) and d.is_dir():
             for f in sorted(d.iterdir()):
-                if f.suffix.lower() in MEDIA_IMAGE_EXT and f.is_file():
+                if f.suffix.lower() in MEDIA_IMAGE_EXT and _inside_project(project_dir, f) and f.is_file():
                     snapshots.append({"path": _rel(project_dir, f)})
 
     renders.sort(key=lambda r: r.get("mtime", 0), reverse=True)
@@ -547,11 +562,11 @@ def _find_poster(project_dir: Path, state: dict) -> Optional[str]:
     # Common image homes, in order of how representative they usually are.
     for rel_dir in ("assets/images", "assets/frames", "exports", "assets", "."):
         d = (project_dir / rel_dir) if rel_dir != "." else project_dir
-        if not d.is_dir():
+        if not _inside_project(project_dir, d) or not d.is_dir():
             continue
         try:
             for f in sorted(d.iterdir()):
-                if f.is_file() and f.suffix.lower() in MEDIA_IMAGE_EXT:
+                if _inside_project(project_dir, f) and f.is_file() and f.suffix.lower() in MEDIA_IMAGE_EXT:
                     return _rel(project_dir, f)
         except OSError:
             continue
@@ -569,11 +584,12 @@ def _last_activity(project_dir: Path) -> float:
         candidates = list(project_dir.glob("checkpoint_*.json"))
         candidates.append(project_dir / "events.jsonl")
         art = project_dir / "artifacts"
-        if art.is_dir():
+        if _inside_project(project_dir, art) and art.is_dir():
             candidates.extend(art.glob("*.json"))
         for p in candidates:
             try:
-                latest = max(latest, p.stat().st_mtime)
+                if _inside_project(project_dir, p):
+                    latest = max(latest, p.stat().st_mtime)
             except OSError:
                 continue
     except OSError:
@@ -590,8 +606,8 @@ def load_board_state(project_dir: Path) -> dict[str, Any]:
     project_dir = Path(project_dir)
     project_id = project_dir.name
 
-    marker = _read_json(project_dir / "project.json") or {}
-    meta_json = _read_json(project_dir / "meta.json") or {}
+    marker = _read_json(project_dir / "project.json", project_dir) or {}
+    meta_json = _read_json(project_dir / "meta.json", project_dir) or {}
 
     checkpoints = _collect_checkpoints(project_dir)
     history = _collect_history(project_dir)
@@ -606,7 +622,7 @@ def load_board_state(project_dir: Path) -> dict[str, Any]:
     pipeline_meta = _load_pipeline_meta(pipeline_type)
 
     artifacts = _collect_artifacts(project_dir, checkpoints)
-    events = read_events(project_dir, limit=250)
+    events = read_events(project_dir, limit=250) if _inside_project(project_dir, project_dir / "events.jsonl") else []
     storyboard = _build_storyboard(project_dir, artifacts, events)
     media = _scan_media(project_dir)
 
