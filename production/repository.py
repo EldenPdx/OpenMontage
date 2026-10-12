@@ -125,6 +125,18 @@ class PostgresRepository:
         with self._connection() as connection:
             return str(connection.execute("SELECT binding_id FROM identity_binding WHERE singleton").fetchone()["binding_id"])
 
+    def assert_legacy_root(self, *, expected_binding: str):
+        """Trusted startup/operations proof against a previously retained root binding."""
+        with self._connection() as connection:
+            row = connection.execute("""SELECT binding_id,
+                EXISTS(SELECT 1 FROM schema_migrations WHERE version=3) AS registry_known,
+                (EXISTS(SELECT 1 FROM tasks WHERE workspace_kind IS NOT NULL OR owner_id IS NOT NULL
+                        OR COALESCE(record->'ownership','null'::jsonb) <> 'null'::jsonb)
+                 OR EXISTS(SELECT 1 FROM project_owners WHERE workspace_kind IS NOT NULL OR owner_id IS NOT NULL OR ownership IS NOT NULL)) AS owned
+                FROM identity_binding WHERE singleton""").fetchone()
+            if row is None or not row["registry_known"] or str(row["binding_id"]) != expected_binding or row["owned"]:
+                raise ContractViolation("Legacy root ownership could not be verified", "identity_unavailable")
+
     def _mark_owned_project(self, connection, project_id, workspace):
         from production.ownership_guard import GuardConflict, mark_authenticated
         if self.projects_dir is None:

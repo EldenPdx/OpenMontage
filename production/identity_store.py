@@ -103,7 +103,12 @@ class PostgresIdentityStore:
     def _session(self, connection, cookie, *, lock=False):
         if not isinstance(cookie, str) or not 43 <= len(cookie) <= 128 or not all(character.isascii() and (character.isalnum() or character in "_-") for character in cookie):
             return None
-        return connection.execute("SELECT * FROM auth_sessions WHERE session_hash=%s AND revoked_at IS NULL AND absolute_expires_at>clock_timestamp() AND idle_expires_at>clock_timestamp()" + (" FOR UPDATE" if lock else ""), (_hash(cookie),)).fetchone()
+        if lock:
+            # Materialization keeps expiry checks after row-lock waits.
+            query = "WITH locked_session AS MATERIALIZED (SELECT * FROM auth_sessions WHERE session_hash=%s FOR UPDATE) SELECT * FROM locked_session WHERE "
+        else:
+            query = "SELECT * FROM auth_sessions WHERE session_hash=%s AND "
+        return connection.execute(query + "revoked_at IS NULL AND absolute_expires_at>clock_timestamp() AND idle_expires_at>clock_timestamp()", (_hash(cookie),)).fetchone()
 
     def _insert_session(self, connection, identity, workspace, sdk_storage, *, absolute_seconds=86400, idle_seconds=28800, absolute_expires_at=None, created_at=None):
         if isinstance(absolute_seconds, bool) or isinstance(idle_seconds, bool) or not isinstance(absolute_seconds, int) or not isinstance(idle_seconds, int) or not 1 <= absolute_seconds <= 86400 or not 1 <= idle_seconds <= 28800:
@@ -178,10 +183,14 @@ class PostgresIdentityStore:
             connection.execute("UPDATE auth_sessions SET revoked_at=clock_timestamp(),revision=revision+1 WHERE session_hash=%s", (row["session_hash"],))
             return result
 
-    def revoke_session(self, cookie):
-        if not isinstance(cookie, str):
+    def revoke_session(self, cookie, *, expected_revision=None):
+        if expected_revision is None and not isinstance(cookie, str):
             return
         with self.repository._connection() as connection:
+            if expected_revision is not None:
+                row = self._session(connection, cookie, lock=True)
+                if row is None or row["revision"] != expected_revision:
+                    raise ContractViolation("Session context changed", "auth_context_conflict")
             connection.execute("UPDATE auth_sessions SET revoked_at=COALESCE(revoked_at,clock_timestamp()),revision=revision+1 WHERE session_hash=%s AND revoked_at IS NULL", (_hash(cookie),))
 
     def revoke_user_sessions(self, user_id):
@@ -197,7 +206,7 @@ class PostgresIdentityStore:
                 raise ContractViolation("Session authority changed", "auth_context_conflict")
             if verified_at > connection.execute("SELECT clock_timestamp() AS now").fetchone()["now"]:
                 raise ContractViolation("Invalid authority verification timestamp")
-            row = connection.execute("UPDATE auth_sessions SET authority_verified_at=%s,revision=revision+1 WHERE session_hash=%s RETURNING *", (verified_at, row["session_hash"])).fetchone()
+            row = connection.execute("UPDATE auth_sessions SET authority_verified_at=GREATEST(authority_verified_at,%s) WHERE session_hash=%s RETURNING *", (verified_at, row["session_hash"])).fetchone()
             return self._materialize(row)
 
     @staticmethod
@@ -232,8 +241,11 @@ class PostgresIdentityStore:
             raise ContractViolation("Login interaction unavailable", "unauthenticated")
         completion = secrets.token_urlsafe(32)
         with self.repository._connection() as connection:
-            row = connection.execute("UPDATE login_interactions SET consumed_at=clock_timestamp(),completion_hash=%s WHERE binding_hash=%s AND state_hash=%s AND consumed_at IS NULL AND expires_at>clock_timestamp() RETURNING *",
-                                     (_hash(completion), _hash(binding_cookie), _hash(state))).fetchone()
+            row = connection.execute("""WITH locked_interaction AS MATERIALIZED (
+                SELECT * FROM login_interactions WHERE binding_hash=%s AND state_hash=%s FOR UPDATE)
+                UPDATE login_interactions SET consumed_at=clock_timestamp(),completion_hash=%s
+                WHERE reference=(SELECT reference FROM locked_interaction WHERE consumed_at IS NULL AND expires_at>clock_timestamp())
+                RETURNING *""", (_hash(binding_cookie), _hash(state), _hash(completion))).fetchone()
             if row is None:
                 raise ContractViolation("Login interaction unavailable", "unauthenticated")
             payload = self._open(row["storage"], "interaction", row["reference"])
@@ -243,7 +255,10 @@ class PostgresIdentityStore:
         if not isinstance(interaction, ConsumedLoginInteraction):
             raise ContractViolation("Login interaction unavailable", "unauthenticated")
         with self.repository._connection() as connection:
-            row = connection.execute("SELECT * FROM login_interactions WHERE reference=%s AND consumed_at IS NOT NULL AND completed_at IS NULL AND expires_at>clock_timestamp() FOR UPDATE", (interaction.reference,)).fetchone()
+            row = connection.execute("""WITH locked_interaction AS MATERIALIZED (
+                SELECT * FROM login_interactions WHERE reference=%s FOR UPDATE)
+                SELECT * FROM locked_interaction WHERE consumed_at IS NOT NULL AND completed_at IS NULL AND expires_at>clock_timestamp()""",
+                                     (interaction.reference,)).fetchone()
             if row is None or not compare_digest(row["completion_hash"], _hash(interaction.completion_token)):
                 raise ContractViolation("Login interaction unavailable", "unauthenticated")
             self._open(row["storage"], "interaction", row["reference"])
