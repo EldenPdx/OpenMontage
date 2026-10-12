@@ -6,9 +6,11 @@ import json
 import os
 import re
 import secrets
+import time
 from urllib.parse import urlsplit
 
 import pytest
+import httpx
 from playwright.sync_api import sync_playwright
 
 from lib.config_model import PiProfile, StudioConfig
@@ -109,10 +111,37 @@ def write_headers(me):
 
 
 def invitation_ticket(fixture, recipient, *, after):
-    mail = fixture.wait_for_mail(recipient, after=after)
+    mail = read_mail(recipient, after=after)
     matches = re.findall(r"#ticket=([A-Za-z0-9_-]{43,128})", mail.get("Text", "") + mail.get("HTML", ""))
     assert matches and len(set(matches)) == 1, "The real invitation must contain one restricted ticket"
     return matches[0]
+
+
+def read_mail(recipient, *, after):
+    """Read a real message without changing the shared identity fixture ledger."""
+    deadline = time.monotonic() + 15
+    with httpx.Client(trust_env=False, timeout=5) as client:
+        while time.monotonic() < deadline:
+            response = client.get("http://127.0.0.1:8025/api/v1/messages", params={"limit": 1000})
+            response.raise_for_status()
+            for message in response.json()["messages"]:
+                if message["ID"] not in after and any(target["Address"] == recipient for target in message["To"]):
+                    result = client.get("http://127.0.0.1:8025/api/v1/message/" + message["ID"])
+                    result.raise_for_status()
+                    return result.json()
+            time.sleep(0.1)
+    raise RuntimeError("The expected real test email was not received")
+
+
+def delete_mail(message_id, recipient):
+    with httpx.Client(trust_env=False, timeout=5) as client:
+        message = client.get("http://127.0.0.1:8025/api/v1/message/" + message_id)
+        if message.status_code == 404:
+            return
+        message.raise_for_status()
+        assert message.json()["To"] and all(target["Address"] == recipient for target in message.json()["To"])
+        response = client.request("DELETE", "http://127.0.0.1:8025/api/v1/messages", json={"IDs": [message_id]})
+        response.raise_for_status()
 
 
 @contextmanager
