@@ -185,7 +185,9 @@ def test_a_slow_old_workspace_read_cannot_restore_private_tasks_or_drafts(ui_env
         page.bring_to_front()
         expect(page.locator("#brief")).to_have_value("", timeout=20000)
         delay["release"].set()
-        expect(page.locator("#studio-status")).to_contain_text("Your workspace changed")
+        expect(page.get_by_label("Workspace", exact=True)).to_have_value(fixture.organizations["A"])
+        expect(page.locator("#brief")).to_be_enabled()
+        expect(page.locator("#create-task")).to_be_enabled()
         expect(page.locator("#task-list")).not_to_contain_text("A private old personal task")
         assert context.request.get(ORIGIN + "/api/studio/tasks").json() == []
         context.close()
@@ -444,4 +446,45 @@ def test_back_navigation_preserves_only_an_unconfirmed_write_in_the_same_context
         expect(page.locator("#current-task")).to_contain_text("An unconfirmed draft before browser history navigation")
         assert len(keys) == 2 and keys[0] == keys[1]
         assert len(context.request.get(ORIGIN + "/api/studio/tasks").json()) == 1
+        context.close()
+
+
+def test_focus_without_broadcast_restores_current_workspace_and_studio(ui_environment):
+    fixture, repository = ui_environment
+    with ui_browser(repository) as (browser, _):
+        context = ui_context(browser)
+        context.add_init_script("window.BroadcastChannel = undefined")
+        first = sign_in(context, fixture, return_to="/en/studio")
+        expect(first.locator("#create-task")).to_be_enabled()
+        first.locator("#brief").fill("An old personal draft which must be cleared")
+        second = context.new_page()
+        second.goto(ORIGIN + "/en/studio")
+        second.get_by_label("Workspace", exact=True).select_option(fixture.organizations["A"])
+        expect(second.get_by_label("Workspace", exact=True)).to_have_value(fixture.organizations["A"])
+        first.bring_to_front()
+        first.evaluate("window.dispatchEvent(new Event('focus'))")
+        expect(first.get_by_label("Workspace", exact=True)).to_have_value(fixture.organizations["A"])
+        expect(first.locator("#brief")).to_have_value("")
+        expect(first.locator("#brief")).to_be_enabled()
+        expect(first.locator("#create-task")).to_be_enabled()
+        context.close()
+
+
+def test_authority_recovery_focus_restores_studio_in_the_verified_context(ui_environment):
+    fixture, repository = ui_environment
+    with ui_browser(repository) as (browser, app):
+        context = ui_context(browser)
+        page = sign_in(context, fixture, return_to="/en/studio")
+        expect(page.locator("#create-task")).to_be_enabled()
+        page.locator("#brief").fill("An unsubmitted draft before the account outage")
+        with identity_outage(app):
+            page.evaluate("window.dispatchEvent(new Event('focus'))")
+            expect(page.get_by_role("link", name="Sign in", exact=True)).to_be_visible(timeout=20000)
+            expect(page.locator("#brief")).to_be_disabled()
+        page.evaluate("window.dispatchEvent(new Event('focus'))")
+        expect(page.locator("#account-control")).to_contain_text(fixture.users["u1"].email)
+        expect(page.get_by_label("Workspace", exact=True).locator("option[value='" + fixture.organizations["A"] + "']")).to_have_count(1)
+        expect(page.locator("#brief")).to_have_value("")
+        expect(page.locator("#brief")).to_be_enabled()
+        expect(page.locator("#create-task")).to_be_enabled()
         context.close()

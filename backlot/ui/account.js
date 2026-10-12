@@ -6,7 +6,7 @@ import "/ui/account-i18n.js";
 const panel = el("section", { id: "account-control", class: "account-control", "aria-label": t("Account") });
 document.querySelector(".wrap").before(panel);
 let me, logoutSession, organizations = [], members = [], invitations = [], managementOpen = false, loadingScope, announcement;
-let renderScope, resetInputs = false;
+let renderScope, resetInputs = false, restorePage = false;
 const channel = typeof BroadcastChannel === "function" ? new BroadcastChannel("backlot.account") : null;
 
 async function logout(button) {
@@ -211,11 +211,18 @@ session().then((value) => { me = value; if (value?.mode === "authenticated") log
 });
 window.addEventListener("languagechange", render);
 window.addEventListener("accountchange", (event) => { clearProtectedView(); me = null; organizations = []; members = []; invitations = []; managementOpen = false;
+  restorePage = ["identity", "unavailable"].includes(event.detail.reason);
   if (event.detail.reason === "identity") logoutSession = null;
   announcement = event.detail.reason === "unavailable" ? "The account service is unavailable. Please try again." : null; render(); });
 window.addEventListener("accountready", () => { session().then((value) => {
   const changed = !me || authScope(me) !== authScope(value);
+  if (changed && restorePage && !location.pathname.endsWith("/invitations/accept")) {
+    restorePage = false;
+    location.replace(localePath(location.pathname.includes("/studio") ? "/studio" : "/"));
+    return;
+  }
   me = value; if (value?.mode === "authenticated") logoutSession = value; if (changed) render();
+  if (changed) loadOrganizations();
 }); });
 window.addEventListener("permissionschange", () => { if (!can("organization:manage")) { members = []; invitations = []; managementOpen = false; } render(); });
 window.addEventListener("focus", () => session(true).catch(() => invalidateSession("unavailable")));
