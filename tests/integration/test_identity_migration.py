@@ -14,7 +14,7 @@ import pytest
 
 from production.contracts import ApprovalBinding, ApprovalDecision, ApprovalRequest, ApprovalScope, CallIntent, CostSnapshot, FileReference, FileWriteIntent, RenderResult, StudioEvent, TaskCommand, TaskCreate, TaskRecord, canonical_sha256
 from production.repository import PostgresRepository
-from production.ownership_guard import WITNESS_PREFIX
+from production.ownership_guard import WITNESS_DIRECTORY, WITNESS_PREFIX
 from tests.integration.test_studio_repository import snapshot
 
 
@@ -80,7 +80,8 @@ def journals(repo):
 def bytes_on_disk(*roots):
     from production.ownership_guard import MARKER
     return {str(path): path.read_bytes() for root in roots for path in root.rglob("*")
-            if path.is_file() and path.name != MARKER and not re.fullmatch(re.escape(WITNESS_PREFIX) + r"[0-9a-f]{64}\.json", path.name)}
+            if path.is_file() and path.name != MARKER and WITNESS_DIRECTORY not in path.relative_to(root).parts
+            and not re.fullmatch(re.escape(WITNESS_PREFIX) + r"[0-9a-f]{64}\.json", path.name)}
 
 
 @pytest.fixture
@@ -163,7 +164,7 @@ def test_subset_mapping_cli_backup_restores_every_project_output_and_exact_sessi
     assert repo.database_binding() == binding and has_guard(restored_projects)
     for source, target in ((projects, restored_projects), (runtime, restored_runtime)):
         for path in source.rglob("*"):
-            if path.is_file() and not re.fullmatch(re.escape(WITNESS_PREFIX) + r"[0-9a-f]{64}\.json", path.name):
+            if path.is_file() and WITNESS_DIRECTORY not in path.relative_to(source).parts and not re.fullmatch(re.escape(WITNESS_PREFIX) + r"[0-9a-f]{64}\.json", path.name):
                 destination = target / path.relative_to(source)
                 assert destination.is_file(), f"Successful restore left a dangling reference: {path.relative_to(source)}"
                 assert destination.read_bytes() == original[str(path.relative_to(source))] == path.read_bytes()
