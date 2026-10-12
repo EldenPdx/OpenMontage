@@ -26,6 +26,8 @@ Owned task acceptance and import protect root and project before the owned DB co
 
 The CLI is `python -m production.identity_migrate`. It is operator-only and has no HTTP claim route. Use a regular configuration file outside served/project roots, mode 0600. Required field is `database_url`; the isolated test handoff's `STUDIO_TEST_DATABASE_URL` is also accepted explicitly. Do not pass a DSN/password/token on argv. `postgres_container` (or the isolated handoff's `container`) selects the trusted cached PostgreSQL container when native pg_dump/pg_restore are unavailable.
 
+Migration integration tests optionally use `STUDIO_TEST_POSTGRES_CONTAINER` for the isolated database container's PostgreSQL clients; when unset or empty, compatible native `pg_dump` and `pg_restore` must be on `PATH`.
+
 Apply additionally requires private `authority_issuer`, `management_endpoint` (the fixed Logto Management API base) and a narrowly authorized `management_access_token`. The CLI makes only GET user/organization existence requests and compares actual returned IDs and the configured issuer. It has no offline-authority/skip switch. The catalog is an existence anchor, never membership permission. Account email/domain is never an identity key. Requests use the operator process's normal network environment; no project proxy configuration is written.
 
 Each mapping entry contains `project_id`, optional matching `task_id`, `workspace:{kind,owner_id}` and `creator_user_id`. The creator must already exist as a complete backend identity. Personal owner must equal that creator; an organization must be registered from a trusted authority result and currently verified before apply. A CLI-only project stays file-only: mapping it creates no task/run and changes no file layout.
