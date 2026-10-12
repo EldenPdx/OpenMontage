@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -136,7 +137,9 @@ def _build_approval_projects() -> None:
 def staged_backlot_server():
     backlot_screenshot_stage.build_stage()
     _build_approval_projects()
-    port = 4897
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
     env = dict(os.environ)
     env["OPENMONTAGE_PROJECTS_DIR"] = str(backlot_screenshot_stage.STAGE_DIR)
     server = subprocess.Popen(
@@ -148,6 +151,8 @@ def staged_backlot_server():
     )
     deadline = time.time() + 20
     while time.time() < deadline:
+        if server.poll() is not None:
+            raise RuntimeError(f"Backlot test server exited before becoming healthy ({server.returncode})")
         try:
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1):
                 break
