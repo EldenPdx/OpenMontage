@@ -1,6 +1,7 @@
 import { el, fmtAgo, getJSON, subscribe, thumbURL } from "/ui/lib.js";
 import { t, registerMessages, localePath, initI18n, languageTabs } from "/ui/i18n.js";
 import messages from "/ui/library-i18n.js";
+import "/ui/account.js";
 
 registerMessages(messages);
 initI18n();
@@ -101,7 +102,8 @@ window.addEventListener("languagechange", () => {
   document.querySelector(".theme-toggle").replaceWith(renderThemeToggle());
   render();
 });
-refresh().catch(console.error);
+window.addEventListener("accountchange", () => { projects = []; render(); });
+refresh().catch(() => { projects = []; render(); });
 if (!new URLSearchParams(location.search).has("static")) {
-  subscribe("/api/library/events", () => refresh().catch(console.error));
+  subscribe("/api/library/events", () => refresh().catch(() => { projects = []; render(); })).catch(() => {});
 }

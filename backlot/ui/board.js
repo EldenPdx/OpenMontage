@@ -1,6 +1,7 @@
 import { studioConfig, studioAction, subscribeTask, stateLabel, moneyMicros, localURL } from "/ui/studio.js";
 import { t, getLocale, localePath, initI18n, languageTabs } from "/ui/i18n.js";
 import "/ui/board-i18n.js";
+import { can, clearProtectedView } from "/ui/session.js";
 // Backlot project board — renders BoardState and stays live via SSE.
 
 import {
@@ -1215,10 +1216,17 @@ refresh().catch((err) => {
 });
 // ?static=1 disables the live feed (screenshots, static exports).
 if (!new URLSearchParams(location.search).has("static")) {
-  subscribe(`/api/project/${encodeURIComponent(projectId)}/events`, () => refresh().catch(console.error));
+  subscribe(`/api/project/${encodeURIComponent(projectId)}/events`, () => refresh().catch(() => {})).catch(() => {});
 }
 
 window.addEventListener("pagehide", () => studioStream?.close());
+window.addEventListener("accountchange", () => {
+  clearProtectedView(); studioStream?.close(); studioDrafts.clear(); studioTask = state = null;
+  studioAvailable = false; replay = selectedStage = null; modal.replaceChildren(); modal.classList.remove("open");
+  app.replaceChildren(el("p", { role: "alert" }, t("Your workspace changed. Review the current space before continuing.")),
+    el("a", { href: localePath("/") }, t("Project library")));
+});
+window.addEventListener("permissionschange", render);
 window.addEventListener("languagechange", () => {
   render();
   if (modal.classList.contains("open")) refreshModal?.();
@@ -1303,7 +1311,8 @@ function renderStudioControls() {
   if (task.error) panel.append(el("p", { class: "studio-error", role: "alert" }, task.error.message));
   function button(id, label, action, primary = false) {
     const node = el("button", { id, type: "button", class: primary ? "primary" : "", onclick: action }, t(label));
-    node.disabled = studioBusy || !studioAvailable; return node;
+    const capability = id === "resume-task" ? "production:resume" : ["abort-task", "cancel-task"].includes(id) ? "production:cancel" : "production:approve";
+    node.disabled = studioBusy || !studioAvailable || !can(capability); return node;
   }
   const gate = task.state === "awaiting_approval" && task.approval?.status === "pending" ? task.approval : null;
   if (gate) {
@@ -1322,12 +1331,12 @@ function renderStudioControls() {
       const choices = el("fieldset", {}, el("legend", {}, t("Available choices — changing the displayed scope requests a revision")));
       for (const option of gate.options) {
         const input = el("input", { type: "checkbox", value: option.option_id, name: "gate-option", "aria-label": option.label });
-        input.checked = draft.options.includes(option.option_id); input.disabled = studioBusy;
+        input.checked = draft.options.includes(option.option_id); input.disabled = studioBusy || !can("production:approve");
         input.addEventListener("change", () => {
           draft.options = [...choices.querySelectorAll("input:checked")].map((item) => item.value);
           const approve = document.getElementById("approve-gate");
           const changed = draft.options.some((id) => id !== "keep-current" && id !== gate.scope.render_runtime);
-          if (approve) approve.disabled = studioBusy || !studioAvailable || changed;
+          if (approve) approve.disabled = studioBusy || !studioAvailable || !can("production:approve") || changed;
         });
         choices.append(el("label", { class: "studio-option" }, input,
           el("span", {}, option.label, option.description ? el("p", {}, option.description) : null)));
@@ -1335,11 +1344,11 @@ function renderStudioControls() {
       panel.append(choices);
     }
     const comment = el("textarea", { id: "revision-comment", maxlength: "10000", rows: "3" });
-    comment.value = draft.comment; comment.disabled = studioBusy;
+    comment.value = draft.comment; comment.disabled = studioBusy || !can("production:approve");
     comment.addEventListener("input", () => { draft.comment = comment.value; });
     panel.append(el("label", { for: "revision-comment" }, t("Revision feedback (required when requesting changes)")), comment);
     const approve = button("approve-gate", "Approve this version", () => sendStudioAction("approve", task, gate, draft), true);
-    approve.disabled = studioBusy || !studioAvailable || draft.options.some((id) => id !== "keep-current" && id !== gate.scope.render_runtime);
+    approve.disabled = studioBusy || !studioAvailable || !can("production:approve") || draft.options.some((id) => id !== "keep-current" && id !== gate.scope.render_runtime);
     panel.append(el("div", { class: "studio-actions" }, approve,
       button("revise-gate", "Request revision", () => sendStudioAction("revise", task, gate, draft)),
       button("reject-gate", "Reject this plan", () => sendStudioAction("reject", task, gate, draft)),

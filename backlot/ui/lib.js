@@ -1,10 +1,9 @@
 // Shared helpers for the Backlot UI.
 import { t, getLocale } from "/ui/i18n.js";
+import { readJSON, scopedSource, session, authScope, activeScope } from "/ui/session.js";
 
 export async function getJSON(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`${res.status} ${url}`);
-  return res.json();
+  return readJSON(url);
 }
 
 export function el(tag, attrs = {}, ...children) {
@@ -65,21 +64,22 @@ export function thumbURL(projectId, relPath, w = 640) {
 }
 
 // Subscribe to a server-sent change feed; call onChange (debounced) per burst.
-export function subscribe(url, onChange) {
+export async function subscribe(url, onChange) {
+  await session();
+  const scope = authScope();
+  if (!scope) return;
   let timer = null;
-  const source = new EventSource(url);
-  source.onmessage = (msg) => {
-    try {
-      const data = JSON.parse(msg.data);
-      if (data.type !== "change") return;
-    } catch {
-      return;
-    }
-    clearTimeout(timer);
-    timer = setTimeout(onChange, 250);
-  };
-  source.onerror = () => { /* EventSource auto-reconnects */ };
-  return source;
+  return scopedSource(url, (source, subscription) => {
+    source.onmessage = (msg) => {
+      if (!activeScope(scope)) { subscription.close(); return; }
+      try {
+        const data = JSON.parse(msg.data);
+        if (data.type !== "change") return;
+      } catch { return; }
+      clearTimeout(timer);
+      timer = setTimeout(() => { if (activeScope(scope)) onChange(); }, 250);
+    };
+  }, () => { if (activeScope(scope)) onChange(); });
 }
 
 // Deterministic pseudo-waveform bars (seeded by a string).
