@@ -418,6 +418,40 @@ def test_logout_racing_workspace_rotation_accepts_only_one_session_generation(id
         context.close()
 
 
+def test_real_database_unavailability_cannot_report_logout_success_or_anonymous_access(identity_environment):
+    import psycopg
+    from psycopg import sql
+    from production.auth.config import AuthConfig
+
+    fixture, repository, _ = identity_environment
+    config = AuthConfig.load()
+    unavailable = "auth26_unavailable_" + uuid4().hex
+    with auth_browser() as browser:
+        context = browser.new_context()
+        signed_in(context, fixture).close()
+        before = context.request.get(ORIGIN + "/api/auth/me").json()
+        try:
+            with psycopg.connect(config.database_url) as connection:
+                connection.execute(sql.SQL("ALTER SCHEMA {} RENAME TO {}").format(
+                    sql.Identifier(repository.schema), sql.Identifier(unavailable)))
+            for path in ("/api/auth/me", "/api/projects", "/api/studio/tasks"):
+                response = context.request.get(ORIGIN + path)
+                assert response.status == 503
+                assert "permissions" not in response.json()
+            failed = context.request.post(ORIGIN + "/api/auth/logout", data={}, headers=write_headers(before))
+            assert failed.status == 503 and "logout_url" not in failed.json()
+            assert "set-cookie" not in failed.headers
+        finally:
+            with psycopg.connect(config.database_url) as connection:
+                connection.execute(sql.SQL("ALTER SCHEMA {} RENAME TO {}").format(
+                    sql.Identifier(unavailable), sql.Identifier(repository.schema)))
+        restored = context.request.get(ORIGIN + "/api/auth/me")
+        assert restored.status == 200
+        assert restored.json()["user"] == before["user"]
+        assert restored.json()["context_id"] == before["context_id"]
+        context.close()
+
+
 def test_real_owned_root_stays_private_after_guard_loss_config_rollback_and_database_replacement(identity_environment):
     import hashlib
     from fastapi.testclient import TestClient
