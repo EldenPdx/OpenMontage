@@ -139,6 +139,14 @@ def saml_claim_form(helper, fixture, source_form, case):
                 target.text = before
         if _claims(response) != _claims(source_response):
             raise ValueError("Changed unrelated fixed SAML claims")
+        directory = os.environ.get("AUTH30_EVIDENCE_DIR")
+        if directory:
+            path = Path(directory) / ("material-" + case + "-" + source_hash + ".json")
+            with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as output:
+                json.dump({"case": case, "source_form_sha256": source_hash,
+                    "submitted_form_sha256": sha256(prepared["form"].encode()).hexdigest(),
+                    "signature_verification": {key: receipt[key] for key in
+                        ("verifier", "certificate_sha256", "response", "assertion")}}, output, indent=2)
     except (OSError, ValueError, KeyError, TypeError, ET.ParseError, subprocess.SubprocessError):
         pytest.fail("PENDING: fixed auth30 SAML material or its trusted signature receipt is unavailable or invalid", pytrace=False)
     return prepared["form"]

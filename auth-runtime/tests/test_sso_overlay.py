@@ -8,6 +8,7 @@ import subprocess
 import sys
 
 import httpx
+import pytest
 
 from tests.fixtures.auth30 import sso_browser
 
@@ -15,7 +16,8 @@ ROOT = Path(__file__).resolve().parents[2]
 CLI = ROOT / "auth-runtime/sso/overlay.py"
 
 
-def test_operator_overlay_cli_seals_real_vendor_bytes_and_refuses_drift(tmp_path):
+@pytest.mark.parametrize("platform", ["linux/amd64", "linux/arm64"])
+def test_operator_overlay_cli_seals_real_vendor_bytes_and_refuses_drift(tmp_path, platform):
     vendor = tmp_path / "vendor"
     core = vendor / "packages/core"
     core.joinpath("build").mkdir(parents=True)
@@ -26,11 +28,12 @@ def test_operator_overlay_cli_seals_real_vendor_bytes_and_refuses_drift(tmp_path
     state = tmp_path / "state"
     state.mkdir(mode=0o700)
     command = [sys.executable, "-B", str(CLI), "prepare", "--state", str(state),
-        "--vendor-root", str(vendor), "--platform", "linux/arm64", "--pin-file", str(ROOT / "auth-runtime/images.lock.json")]
+        "--vendor-root", str(vendor), "--platform", platform, "--pin-file", str(ROOT / "auth-runtime/images.lock.json")]
     prepared = subprocess.run(command, capture_output=True, text=True)
     assert prepared.returncode == 0, "The operator must be able to prepare a sealed overlay for pinned vendor files"
     manifest = json.loads(prepared.stdout)
     assert manifest["vendor_version"] == "1.44.0"
+    assert manifest["platform"] == platform
     assert manifest["structural_only"] is True
     generated = Path(manifest["mounts"][0]["source"])
     assert generated.is_file() and generated.stat().st_mode & 0o777 == 0o600
