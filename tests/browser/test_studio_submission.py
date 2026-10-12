@@ -173,7 +173,7 @@ def test_expired_csrf_session_is_refreshed_without_changing_submission_key():
                 route.continue_();return
             keys.append(route.request.headers["idempotency-key"])
             if len(keys)==1:
-                route.fulfill(status=403,json={"error":{"code":"forbidden","message":"Expired session"}})
+                route.fulfill(status=403,json={"error":{"code":"csrf_invalid","message":"Expired session"}})
             else:
                 route.continue_()
         page.route("**/api/studio/tasks",expire_once)

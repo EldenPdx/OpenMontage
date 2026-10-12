@@ -325,7 +325,7 @@ def test_profile_turn_limits_and_credential_records_fail_before_reservation(repo
 
 def test_existing_control_plane_upgrades_to_call_and_file_journals(repository_factory):
     repository = repository_factory(previous_version=True)
-    assert repository.migrate() == 5
+    assert repository.migrate() == 6
     task = create(repository)
     claim = repository.claim_command("worker-a")
     repository.transition(task.task_id, TaskState.RUNNING, expected_version=1, fence=claim.context.fence)

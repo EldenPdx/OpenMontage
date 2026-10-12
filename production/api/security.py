@@ -52,7 +52,7 @@ def install_security(app):
             cookie = request.cookies.get("studio_session", "")
             token = request.headers.get("x-csrf-token", "")
             if not valid(cookie) or not token.isascii() or not hmac.compare_digest(cookie, token):
-                return error_response("forbidden", "Refresh Studio to obtain a valid browser session")
+                return error_response("csrf_invalid", "Refresh Studio to obtain a valid browser session")
         response = await call_next(request)
         response.headers["Cache-Control"] = "no-store"
         return response
@@ -156,7 +156,8 @@ def install_boundary(app, *, config, projects_dir):
     @app.middleware("http")
     async def boundary(request, call_next):
         path = request.url.path
-        public = path == "/api/health" or path == "/ui" or path.startswith("/ui/") or path.rstrip("/") in {
+        invitation = path.rstrip("/") in {"/ui/invitation.html", "/zh/invitations/accept", "/ja/invitations/accept", "/en/invitations/accept"}
+        public = invitation or path == "/api/health" or path == "/ui" or path.startswith("/ui/") or path.rstrip("/") in {
             "", "/studio", "/zh", "/ja", "/en", "/zh/studio", "/ja/studio", "/en/studio"}
         try:
             host = request.headers.get("host", "")
@@ -230,5 +231,7 @@ def install_boundary(app, *, config, projects_dir):
                     yield chunk
             response.body_iterator = guarded_stream()
         if public and path != "/api/health":
-            response.headers["Cache-Control"] = "no-cache"
+            response.headers["Cache-Control"] = "private, no-store" if invitation else "no-cache"
+            if invitation:
+                response.headers.update({"Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff", "Vary": "Cookie"})
         return response
