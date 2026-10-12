@@ -3,6 +3,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backlot import projects_api
@@ -47,6 +48,10 @@ def create_app(*, studio_repository=None, studio_config=None, studio_environment
     projects_api.mount_projects(app)
     if projects_api.UI_DIR.is_dir():
         app.mount("/ui", StaticFiles(directory=projects_api.UI_DIR), name="ui")
+    async def invitation_page():
+        return FileResponse(projects_api.UI_DIR / "invitation.html")
+    for locale in ("zh", "ja", "en"):
+        app.add_api_route(f"/{locale}/invitations/accept", invitation_page, methods=["GET"])
     if runtime is not None:
         from production.auth.routes import mount_auth
         mount_auth(app, runtime)

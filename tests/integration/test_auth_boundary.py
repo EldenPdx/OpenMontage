@@ -9,6 +9,40 @@ import pytest
 from tests.browser.test_studio_submission import serving
 
 
+def test_local_stale_csrf_is_distinct_from_a_denied_origin(tmp_path, monkeypatch):
+    from backlot import server, projects_api
+    monkeypatch.setattr(projects_api, "PROJECTS_DIR", tmp_path)
+    with serving(server.create_app(auth_environment={})) as origin, httpx.Client(trust_env=False, timeout=3) as client:
+        body = {"brief": "Local production", "profile_id": "local"}
+        stale = client.post(origin + "/api/studio/tasks", headers={"Origin": origin}, json=body)
+        assert stale.status_code == 403
+        assert stale.json()["error"]["code"] == "csrf_invalid"
+        denied = client.post(origin + "/api/studio/tasks", headers={"Origin": "https://outside.example"}, json=body)
+        assert denied.status_code == 403
+        assert denied.json()["error"]["code"] == "forbidden"
+
+
+@pytest.mark.parametrize("locale", ["en", "zh", "ja"])
+def test_invitation_landing_is_a_private_public_shell_without_identity_service(tmp_path, monkeypatch, locale):
+    from backlot import server, projects_api
+    root, ui = tmp_path / "projects", tmp_path / "ui"
+    root.mkdir()
+    ui.mkdir()
+    (ui / "invitation.html").write_text("<!doctype html><title>Invitation</title>")
+    monkeypatch.setattr(projects_api, "PROJECTS_DIR", root)
+    monkeypatch.setattr(projects_api, "UI_DIR", ui)
+    app = server.create_app(auth_environment={"OPENMONTAGE_AUTH_MODE": "authenticated"})
+    with serving(app) as origin, httpx.Client(trust_env=False, timeout=3) as client:
+        response = client.get(origin + f"/{locale}/invitations/accept")
+        assert response.status_code == 200
+        assert "Invitation" in response.text
+        assert response.headers["referrer-policy"] == "no-referrer"
+        assert response.headers["cache-control"] == "private, no-store"
+        assert response.headers["x-content-type-options"] == "nosniff"
+        assert client.get(origin + "/api/auth/me").status_code == 503
+        assert client.get(origin + "/api/projects").status_code == 503
+
+
 def test_authenticated_configuration_cannot_expose_local_projects(tmp_path, monkeypatch):
     from backlot import server, projects_api
     monkeypatch.setattr(projects_api, "PROJECTS_DIR", tmp_path)
