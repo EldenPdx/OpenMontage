@@ -32,6 +32,13 @@ ROOT = Path(__file__).resolve().parents[1]
 def _tool_child(tool, inputs, project, connection):
     """No request starts until its parent has durably recorded process ownership."""
     os.setsid()
+    environment = {name: os.environ[name] for name in (
+        "PATH", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "TEMP", "TMP", "NO_PROXY", "no_proxy", "NEW_API_KEY", "NEW_API_BASE_URL"
+    ) if name in os.environ}
+    os.environ.clear()
+    os.environ.update(environment)
+    # Reloading the server's .env would restore unrelated identity credentials.
+    os.environ["PYTHON_DOTENV_DISABLED"] = "1"
     os.chdir(project)
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
     signal.signal(signal.SIGINT, signal.SIG_DFL)
@@ -247,6 +254,8 @@ class ProductionToolBridge:
         self.repository.assert_fence(context)
         if self.model_profile is not None and canonical_sha256(self.model_profile.model_dump(mode="json")) != context.config_snapshot.configuration_sha256:
             raise ContractViolation("Model profile does not match the immutable run", "profile_unavailable")
+        from production.artifact_io import protect_owned_project
+        protect_owned_project(self.repository, self.store.projects_dir, context)
         self.contexts[context.run_id] = context
         project = self.store.project(context)
         project.mkdir(parents=True, exist_ok=True)

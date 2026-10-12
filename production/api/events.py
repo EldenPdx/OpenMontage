@@ -7,7 +7,7 @@ import time
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import StreamingResponse
 
-from production.api.tasks import task_identifier
+from production.api.tasks import task_for_request, task_identifier, task_stream_authorizer
 from production.contracts import ContractViolation, TERMINAL_STATES
 
 
@@ -32,8 +32,9 @@ def events_router(backend):
         if after < 0 or after > 2**63 - 1:
             raise ContractViolation("Invalid event cursor")
         repo = backend()
-        await asyncio.to_thread(repo.get_task, task_id)
+        await task_for_request(request, repo, task_id)
         initial = await asyncio.to_thread(repo.events, task_id, after=after, limit=100)
+        authorized = getattr(request.state, "studio_stream_authorize", None) or task_stream_authorizer(request, repo, task_id)
 
         async def stream():
             cursor = after
@@ -41,10 +42,14 @@ def events_router(backend):
             heartbeat = time.monotonic()
             while not await request.is_disconnected():
                 for event in batch:
+                    try:
+                        await authorized()
+                    except ContractViolation:
+                        return
                     yield event_record(event)
                     cursor = event.event_id
                 if len(batch) < 100:
-                    task = await asyncio.to_thread(repo.get_task, task_id)
+                    task = await task_for_request(request, repo, task_id)
                     if task.state in TERMINAL_STATES:
                         # Check once more after reading state to avoid losing its commit event.
                         final = await asyncio.to_thread(repo.events, task_id, after=cursor, limit=100)
@@ -53,12 +58,20 @@ def events_router(backend):
                         batch = final
                         continue
                     if time.monotonic() - heartbeat >= 15:
+                        try:
+                            await authorized()
+                        except ContractViolation:
+                            return
                         yield ": heartbeat\n\n"
                         heartbeat = time.monotonic()
                     await asyncio.sleep(0.25)
                 try:
                     batch = await asyncio.to_thread(repo.events, task_id, after=cursor, limit=100)
                 except ContractViolation:
+                    try:
+                        await authorized()
+                    except ContractViolation:
+                        return
                     yield 'event: resync\ndata: {"reason":"Event storage changed; refresh the task"}\n\n'
                     return
 

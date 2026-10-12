@@ -28,10 +28,11 @@ class ApprovalService:
             raise ContractViolation("Displayed approval content changed; refresh the current gate", "approval_conflict")
         return content
 
-    def decide(self, task_id, gate_id, decision, key):
+    def decide(self, task_id, gate_id, decision, key, *, workspace=None, actor=None):
         if decision.binding.task_id != task_id or decision.binding.gate_id != gate_id:
             raise ContractViolation("Decision path differs from its bound gate", "approval_conflict")
-        return self.repository.decide_gate(decision, idempotency_key=key, validate_evidence=self._verify_evidence)
+        return self.repository.decide_gate(decision, idempotency_key=key, workspace=workspace, actor=actor,
+                                          validate_evidence=self._verify_evidence)
 
     def _verify_evidence(self, task, gate):
         profile_for_snapshot(self.config, task.config_snapshot)
@@ -51,12 +52,12 @@ class ApprovalService:
             except Exception:
                 raise ContractViolation("Approval checkpoint is invalid", "invalid_artifact") from None
 
-    def resume(self, task_id, request, key):
-        task = self.repository.get_task(task_id)
+    def resume(self, task_id, request, key, *, workspace=None, actor=None):
+        task = self.repository.get_task(task_id) if workspace is None else self.repository.get_task_for_workspace(task_id, workspace)
         if task.version == request.expected_version:
             profile_for_snapshot(self.config, task.config_snapshot)
         command = TaskCommand(command_id="cmd-" + uuid4().hex, task_id=task_id, run_id=task.run_id, kind="resume",
                               expected_version=request.expected_version, idempotency_key=key,
                               payload={"comment": request.comment})
-        self.repository.enqueue_command(command)
-        return self.repository.get_task(task_id)
+        self.repository.enqueue_command(command, workspace=workspace, actor=actor)
+        return self.repository.get_task(task_id) if workspace is None else self.repository.get_task_for_workspace(task_id, workspace)

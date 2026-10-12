@@ -10,6 +10,7 @@ import time
 from uuid import uuid4
 
 from production.contracts import CallIntent, ContractViolation, ErrorDTO, TaskState
+from production.artifact_io import protect_owned_project
 from production.pi_config import prepare_pi, profile_for_snapshot
 from production.pi_rpc import PiRPC
 from production.recovery import RecoveryService, process_path, record_process, write_private
@@ -152,6 +153,7 @@ class Worker:
             project = self.projects_dir / context.project_id
             if project.resolve() != project:
                 raise ContractViolation("Task project is a filesystem alias", "file_conflict")
+            await asyncio.to_thread(protect_owned_project, self.repository, self.projects_dir, context)
             try:
                 project_lease = StudioProjectLease(project, f"{context.task_id}/{context.run_id}/{context.fence}").acquire()
             except CheckpointValidationError:
