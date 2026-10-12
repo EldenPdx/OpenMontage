@@ -38,7 +38,10 @@ def seed_keycloak(state, fixture):
             return response.json() if response.content else True
 
         realm_path = "/admin/realms/" + namespace
-        if request("GET", realm_path, missing_ok=True) is None:
+        realm = request("GET", realm_path, missing_ok=True)
+        if realm is not None and realm.get("attributes", {}).get("openmontageAuthFixture") != namespace:
+            raise RuntimeError("IdP realm does not belong to this fixture")
+        if realm is None:
             request("POST", "/admin/realms", {"realm": namespace, "enabled": True, "sslRequired": "none",
                 "registrationAllowed": False, "duplicateEmailsAllowed": True, "loginWithEmailAllowed": True,
                 "attributes": {"openmontageAuthFixture": namespace}})
@@ -59,14 +62,6 @@ def seed_keycloak(state, fixture):
                 raise RuntimeError("Ambiguous IdP fixture user")
             private["users"][protocol]["id"] = existing[0]["id"]
             private_json(path, private)
-        realm = request("GET", realm_path)
-        attributes = realm.get("attributes", {})
-        if attributes.get("openmontageAuthFixture") != namespace:
-            # Adopt only our pre-marker setup whose recorded user IDs all match authority.
-            if any(request("GET", realm_path + "/users/" + user["id"])["username"] != user["username"] for user in private["users"].values()):
-                raise RuntimeError("IdP realm does not belong to this fixture")
-            request("PUT", realm_path, {**realm, "attributes": {**attributes, "openmontageAuthFixture": namespace}})
-
         connectors = api.items("/api/sso-connectors")
         output = {}
         for protocol, provider in (("oidc", "OIDC"), ("saml", "SAML")):

@@ -231,6 +231,49 @@ def test_cleanup_removes_only_recorded_logto_idp_and_mail_resources():
         fixture.api.request("DELETE", "/api/organizations/" + sentinel["id"], missing_ok=True)
 
 
+def test_foreign_keycloak_realm_is_rejected_before_mutation_and_survives_cleanup():
+    import json
+    import pytest
+    from uuid import uuid4
+    from tests.fixtures.identity import load_fixture, seed_fixture, cleanup_fixture
+    fixture = load_fixture()
+    state = fixture.path.parent
+    namespace = "auth24-owner-" + uuid4().hex[:8]
+    credentials = json.loads((state / "credentials.json").read_text())
+    base = "http://127.0.0.1:8180"
+    realm_url = base + "/admin/realms/" + namespace
+    path = state / ("fixture-" + namespace + ".json")
+    with httpx.Client(trust_env=False, timeout=20) as client:
+        token = client.post(base + "/realms/master/protocol/openid-connect/token", data={
+            "grant_type": "password", "client_id": "admin-cli", "username": "auth24-admin", "password": credentials["keycloak_admin"]})
+        token.raise_for_status()
+        client.headers["Authorization"] = "Bearer " + token.json()["access_token"]
+        assert client.get(realm_url).status_code == 404
+        client.post(base + "/admin/realms", json={"realm": namespace, "enabled": True,
+            "attributes": {"openmontageAuthFixture": "foreign-owner", "sentinel": "retain"}}).raise_for_status()
+        try:
+            client.post(realm_url + "/users", json={"username": "foreign-sentinel", "enabled": True}).raise_for_status()
+            client.post(realm_url + "/clients", json={"clientId": "foreign-client", "protocol": "openid-connect", "publicClient": True}).raise_for_status()
+            before_realm = client.get(realm_url).json()
+            before_users = client.get(realm_url + "/users").json()
+            before_clients = client.get(realm_url + "/clients").json()
+            with pytest.raises(RuntimeError, match="IdP realm does not belong to this fixture"):
+                seed_fixture(namespace=namespace)
+            assert client.get(realm_url).json() == before_realm
+            assert client.get(realm_url + "/users").json() == before_users
+            assert client.get(realm_url + "/clients").json() == before_clients
+            assert not (state / ("idp-" + namespace + ".json")).exists()
+            cleanup_fixture(load_fixture(path))
+            assert client.get(realm_url).json() == before_realm
+            assert client.get(realm_url + "/users").json() == before_users
+            assert client.get(realm_url + "/clients").json() == before_clients
+        finally:
+            if path.exists():
+                cleanup_fixture(load_fixture(path))
+            # Only the test creator removes this deliberately foreign-marked probe.
+            assert client.delete(realm_url).status_code in {204, 404}
+
+
 def test_origin_registration_is_exact_reentrant_and_rejects_foreign_origins():
     import pytest
     from tests.fixtures.identity import load_fixture
