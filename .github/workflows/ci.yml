@@ -72,5 +72,15 @@ jobs:
       - name: Run lint smoke checks
         run: make lint
 
+      - name: Generate a temporary identity test encryption key
+        run: |
+          .venv/bin/python - <<'PY'
+          import base64, os, secrets
+          key = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode()
+          print(f"::add-mask::{key}")
+          with open(os.environ["GITHUB_ENV"], "a") as environment:
+              environment.write(f"STUDIO_TEST_SESSION_KEY={key}\n")
+          PY
+
       - name: Run test suite
         run: make test
