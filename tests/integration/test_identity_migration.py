@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
@@ -13,6 +14,7 @@ import pytest
 
 from production.contracts import ApprovalBinding, ApprovalDecision, ApprovalRequest, ApprovalScope, CallIntent, CostSnapshot, FileReference, FileWriteIntent, RenderResult, StudioEvent, TaskCommand, TaskCreate, TaskRecord, canonical_sha256
 from production.repository import PostgresRepository
+from production.ownership_guard import WITNESS_PREFIX
 from tests.integration.test_studio_repository import snapshot
 
 
@@ -77,7 +79,8 @@ def journals(repo):
 
 def bytes_on_disk(*roots):
     from production.ownership_guard import MARKER
-    return {str(path): path.read_bytes() for root in roots for path in root.rglob("*") if path.is_file() and path.name != MARKER}
+    return {str(path): path.read_bytes() for root in roots for path in root.rglob("*")
+            if path.is_file() and path.name != MARKER and not re.fullmatch(re.escape(WITNESS_PREFIX) + r"[0-9a-f]{64}\.json", path.name)}
 
 
 @pytest.fixture
@@ -115,7 +118,7 @@ def test_subset_mapping_cli_backup_restores_every_project_output_and_exact_sessi
     import subprocess
     import sys
     from production.contracts import ResourceOwnership, SessionReference, WorkspaceContext
-    from production.ownership_guard import has_guard, mark_authenticated
+    from production.ownership_guard import MARKER, has_guard, mark_authenticated
     from tests.integration.test_identity_persistence import identity_store
     repo, projects, runtime = two_projects
     repo.migrate()
@@ -160,7 +163,7 @@ def test_subset_mapping_cli_backup_restores_every_project_output_and_exact_sessi
     assert repo.database_binding() == binding and has_guard(restored_projects)
     for source, target in ((projects, restored_projects), (runtime, restored_runtime)):
         for path in source.rglob("*"):
-            if path.is_file():
+            if path.is_file() and not re.fullmatch(re.escape(WITNESS_PREFIX) + r"[0-9a-f]{64}\.json", path.name):
                 destination = target / path.relative_to(source)
                 assert destination.is_file(), f"Successful restore left a dangling reference: {path.relative_to(source)}"
                 assert destination.read_bytes() == original[str(path.relative_to(source))] == path.read_bytes()
@@ -180,6 +183,13 @@ def test_subset_mapping_cli_backup_restores_every_project_output_and_exact_sessi
     manifest = json.loads((archive / "manifest.json").read_text())
     for reference, digest in manifest["files"].items():
         assert sha256((archive / reference).read_bytes()).hexdigest() == digest
+    for witness in projects.glob(WITNESS_PREFIX + "*.json"):
+        assert not (restored_projects / witness.name).exists()
+    (restored_projects / MARKER).unlink()
+    assert has_guard(restored_projects)
+    if ownership:
+        (restored_projects / task.project_id / MARKER).unlink()
+        assert has_guard(restored_projects / task.project_id)
 
 
 @pytest.mark.parametrize("omitted", ["project", "video", "session"])
