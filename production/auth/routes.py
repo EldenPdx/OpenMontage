@@ -4,6 +4,7 @@ import asyncio
 import base64
 from datetime import datetime, timezone
 import json
+import math
 import secrets
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -46,11 +47,17 @@ class AuthRuntime:
         await asyncio.to_thread(mark_authenticated, projects_dir, binding=binding)
 
     def set_session_cookie(self, response, handle):
-        remaining = max(1, int((handle.session.metadata.absolute_expires_at - datetime.now(timezone.utc)).total_seconds()))
+        remaining = max(1, math.ceil((handle.session.metadata.absolute_expires_at - datetime.now(timezone.utc)).total_seconds()))
         response.set_cookie(SESSION_COOKIE, handle.cookie, httponly=True, secure=self.config.origin.startswith("https:"),
                             samesite="lax", path="/", max_age=remaining, expires=handle.session.metadata.absolute_expires_at)
 
     async def require_context(self, request, *, write=False):
+        try:
+            return await asyncio.wait_for(self._require_context(request, write=write), timeout=15)
+        except asyncio.TimeoutError:
+            raise ContractViolation("Identity service is unavailable", "identity_unavailable") from None
+
+    async def _require_context(self, request, *, write=False):
         cookie = request.cookies.get(SESSION_COOKIE)
         if write:
             session = await asyncio.to_thread(self.store.validate_context, cookie,
@@ -70,12 +77,14 @@ class AuthRuntime:
         if storage.values != session.sdk_storage:
             session = await asyncio.to_thread(self.store.update_session, cookie,
                 expected_revision=session.metadata.revision, sdk_storage=storage.values)
+        session = await asyncio.to_thread(self.store.record_authority_verification, cookie,
+            expected_revision=session.metadata.revision, verified_at=authority["verified_at"])
         fresh = await asyncio.to_thread(self.store.touch_session, cookie)
-        if fresh.metadata.context_id != session.metadata.context_id:
+        if fresh.metadata.context_id != session.metadata.context_id or fresh.metadata.revision != session.metadata.revision:
             raise ContractViolation("Identity context changed", "auth_context_conflict")
         context = AuthContext(identity=fresh.metadata.identity, workspace=fresh.metadata.workspace,
             role=authority["role"], permissions=authority["permissions"], context_id=fresh.metadata.context_id,
-            session_ref=fresh.metadata.session_ref, authority_verified_at=datetime.now(timezone.utc))
+            session_ref=fresh.metadata.session_ref, authority_verified_at=authority["verified_at"])
         request.state.auth_context, request.state.auth_session = context, fresh
         request.state.auth_user = {"user_id": context.identity.user_id, "name": info.name,
                                    "email": info.email, "email_verified": info.email_verified is True}
@@ -168,7 +177,7 @@ def mount_auth(app, runtime):
             expected_revision=request.state.auth_session.metadata.revision, workspace=body)
         request.state.auth_context = AuthContext(identity=context.identity, workspace=body,
             role=authority["role"], permissions=authority["permissions"], context_id=handle.session.metadata.context_id,
-            session_ref=handle.session.metadata.session_ref, authority_verified_at=datetime.now(timezone.utc))
+            session_ref=handle.session.metadata.session_ref, authority_verified_at=authority["verified_at"])
         request.state.auth_session, request.state.auth_workspace_name = handle.session, authority["name"]
         response = JSONResponse(runtime.me(request))
         runtime.set_session_cookie(response, handle)
@@ -178,7 +187,7 @@ def mount_auth(app, runtime):
     async def logout(body: LogoutRequest, request: Request):
         session = await asyncio.to_thread(runtime.store.validate_context, request.cookies.get(SESSION_COOKIE),
             request.headers.get("x-csrf-token"), request.headers.get("x-auth-context"))
-        await asyncio.to_thread(runtime.store.revoke_session, request.cookies.get(SESSION_COOKIE))
+        await asyncio.to_thread(runtime.store.revoke_session, request.cookies.get(SESSION_COOKIE), expected_revision=session.metadata.revision)
         logout_url = None
         try:
             client = PrivateLogtoClient(runtime.config, PrivateStorage(session.sdk_storage))

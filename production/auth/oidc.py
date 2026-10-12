@@ -1,6 +1,7 @@
 """Official Logto flow with private snapshots and the SDK's missing validation."""
 
 import hmac
+import math
 from urllib.parse import urlsplit
 
 import httpx
@@ -64,7 +65,7 @@ class VerifiedCore(OidcCore):
                                 audience=clientId, options={"require": ["iss", "sub", "aud", "iat", "exp"]})
             if not isinstance(claims["sub"], str) or not 1 <= len(claims["sub"]) <= 256:
                 raise ValueError
-            if any(type(claims[name]) not in (int, float) for name in ("iat", "exp")) or claims["exp"] <= claims["iat"]:
+            if any(type(claims[name]) not in (int, float) or not math.isfinite(claims[name]) for name in ("iat", "exp")) or claims["exp"] <= claims["iat"]:
                 raise ValueError
             audience = claims["aud"]
             if not isinstance(audience, (str, list)) or not audience or isinstance(audience, list) and any(not isinstance(item, str) for item in audience):
@@ -74,7 +75,7 @@ class VerifiedCore(OidcCore):
             if self.nonce is not None and (not isinstance(claims.get("nonce"), str) or not hmac.compare_digest(claims["nonce"].encode(), self.nonce.encode())):
                 raise ValueError
             self.claims = claims
-        except (ValueError, TypeError, KeyError, jwt.PyJWTError):
+        except (ValueError, TypeError, KeyError, OverflowError, jwt.PyJWTError):
             raise ContractViolation("Authentication could not be verified", "unauthenticated") from None
 
     async def fetchTokenByCode(self, clientId, clientSecret, redirectUri, code, codeVerifier):

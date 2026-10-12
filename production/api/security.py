@@ -92,6 +92,7 @@ def local_root_protected(root):
 
 
 def install_boundary(app, *, config, projects_dir):
+    import asyncio
     import ipaddress
     import logging
     from urllib.parse import urlsplit
@@ -114,6 +115,27 @@ def install_boundary(app, *, config, projects_dir):
 
     def failure(error):
         return error_response(error.code, str(error), statuses.get(error.code, 422))
+
+    async def local_access():
+        if local_root_protected(projects_dir) or config is None or any((config.issuer, config.app_id, config.app_secret, config.encryption_keys, config.management_app_secret)):
+            raise ContractViolation("Protected data cannot be served anonymously", "dependency_unavailable")
+        provenance = config.root_provenance
+        if provenance is None:
+            if config.database_url:
+                raise ContractViolation("Root classification is unavailable", "dependency_unavailable")
+            return
+        if str(__import__("pathlib").Path(provenance.canonical_root).resolve()) != str(projects_dir.resolve()):
+            raise ContractViolation("Root classification is unavailable", "dependency_unavailable")
+        if provenance.classification == "file_only_legacy" and not config.database_url:
+            return
+        if provenance.classification != "adopted_or_restored" or not config.database_url or not provenance.expected_binding:
+            raise ContractViolation("Root classification is unavailable", "dependency_unavailable")
+        try:
+            from production.repository import PostgresRepository
+            repository = PostgresRepository(config.database_url, schema=config.database_schema)
+            await asyncio.to_thread(repository.assert_legacy_root, expected_binding=provenance.expected_binding)
+        except Exception:
+            raise ContractViolation("Root classification is unavailable", "dependency_unavailable") from None
 
     @app.exception_handler(ContractViolation)
     async def auth_error(request, error):
@@ -143,8 +165,8 @@ def install_boundary(app, *, config, projects_dir):
                     trusted = False
                 if not trusted or forwarded:
                     raise ContractViolation("Trusted loopback access is required", "forbidden")
-                if not public and (config is not None and config.database_url or local_root_protected(projects_dir)):
-                    raise ContractViolation("Protected data cannot be served anonymously", "dependency_unavailable")
+                if not public:
+                    await local_access()
             else:
                 if path.rstrip("/") == "/openapi.json":
                     return error_response("not_found", "Not found", 404)
@@ -172,6 +194,16 @@ def install_boundary(app, *, config, projects_dir):
             if app.state.auth_mode == "local":
                 raise
             response = error_response("identity_unavailable", "Identity service is unavailable", 503)
+        if path.rstrip("/") == "/api/auth/callback" and response.status_code >= 400 and "text/html" in request.headers.get("accept", "").lower():
+            from fastapi.responses import HTMLResponse
+            if hasattr(response, "body_iterator"):
+                async for _ in response.body_iterator:
+                    pass
+            nonce = secrets.token_urlsafe(24)
+            response = HTMLResponse('<!doctype html><meta charset="utf-8"><title>Sign in could not complete</title>'
+                '<p>Sign in could not complete.</p><a href="/api/auth/login">Sign in again</a>'
+                f'<script nonce="{nonce}">history.replaceState(null,"","/en");</script>', status_code=response.status_code,
+                headers={"Content-Security-Policy": f"default-src 'none'; script-src 'nonce-{nonce}'; base-uri 'none'; frame-ancestors 'none'"})
         if app.state.auth_mode != "local" and not public:
             response.headers.update({"Cache-Control": "private, no-store", "Vary": "Cookie", "X-Content-Type-Options": "nosniff",
                                      "Referrer-Policy": "no-referrer"})
@@ -183,7 +215,9 @@ def install_boundary(app, *, config, projects_dir):
 
             async def guarded_stream():
                 async for chunk in original:
-                    if local_root_protected(projects_dir):
+                    try:
+                        await local_access()
+                    except ContractViolation:
                         return
                     yield chunk
             response.body_iterator = guarded_stream()

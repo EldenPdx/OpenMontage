@@ -8,6 +8,7 @@ from pathlib import Path
 import stat
 from typing import Literal
 from urllib.parse import urlsplit
+from uuid import UUID
 
 from pydantic import Field, model_validator
 
@@ -24,6 +25,22 @@ def trusted_url(value, *, development=False, origin_only=False):
     if origin_only and (parsed.path or value != f"{parsed.scheme}://{parsed.netloc}"):
         raise ValueError("Origin must be exact")
     return parsed
+
+
+class RootProvenance(ContractModel):
+    canonical_root: str
+    classification: Literal["file_only_legacy", "adopted_or_restored", "authenticated_or_unknown"]
+    expected_binding: str | None = None
+
+    @model_validator(mode="after")
+    def validate_binding(self):
+        if not Path(self.canonical_root).is_absolute():
+            raise ValueError("Root classification must use an absolute path")
+        if self.expected_binding is not None:
+            UUID(self.expected_binding)
+        if self.classification == "file_only_legacy" and self.expected_binding is not None:
+            raise ValueError("File-only legacy classification cannot assert a database")
+        return self
 
 
 class AuthConfig(ContractModel):
@@ -47,6 +64,7 @@ class AuthConfig(ContractModel):
     trusted_proxy_ips: list[str] = Field(default_factory=list)
     absolute_seconds: int = Field(default=86400, strict=True, ge=1, le=86400)
     idle_seconds: int = Field(default=28800, strict=True, ge=1, le=28800)
+    root_provenance: RootProvenance | None = None
 
     @model_validator(mode="after")
     def validate_trust(self):
@@ -66,7 +84,7 @@ class AuthConfig(ContractModel):
             raise ValueError("Callback or logout redirect is not trusted")
         for value in self.trusted_proxy_ips:
             ipaddress.ip_address(value)
-        if any(len(base64.urlsafe_b64decode(key)) != 32 for key in self.encryption_keys.values()):
+        if any(len(base64.b64decode(key, altchars=b"-_", validate=True)) != 32 for key in self.encryption_keys.values()):
             raise ValueError("Invalid private session key")
         return self
 
@@ -85,6 +103,8 @@ class AuthConfig(ContractModel):
                     values = json.load(source)
             if "OPENMONTAGE_AUTH_MODE" in environment:
                 values["mode"] = environment["OPENMONTAGE_AUTH_MODE"]
+            if environment.get("OPENMONTAGE_AUTH_CONFIG_FILE") and values.get("mode", "local") == "local" and "root_provenance" not in values:
+                raise ValueError("Configured local roots require trusted classification")
             return cls.model_validate(values)
         except (ValueError, TypeError, OSError):
             raise ContractViolation("Identity service is unavailable", "identity_unavailable") from None
