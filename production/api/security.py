@@ -191,6 +191,10 @@ def install_boundary(app, *, config, projects_dir):
             response = await call_next(request)
         except ContractViolation as error:
             response = failure(error)
+            if error.code == "unauthenticated":
+                redirect = getattr(app.state, "auth_page_redirect", None)
+                if redirect is not None:
+                    response = redirect(request) or response
         except Exception:
             if app.state.auth_mode == "local":
                 raise
