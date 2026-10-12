@@ -189,7 +189,27 @@
         "tests/integration/test_identity_validation_cli.py::test_a_failed_new_run_cannot_publish_a_previous_success_receipt",
         "tests/integration/test_identity_validation_cli.py::test_cold_image_transport_needs_explicit_download_permission[offline-default]",
         "tests/integration/test_identity_validation_cli.py::test_cold_image_transport_needs_explicit_download_permission[explicit-online]",
-        "tests/integration/test_organization_persistence.py::test_invitation_creation_material_is_encrypted_bound_and_readable_after_key_rotation"
+        "tests/integration/test_organization_persistence.py::test_invitation_creation_material_is_encrypted_bound_and_readable_after_key_rotation",
+        "tests/integration/test_identity_business_outage.py::test_business_outage_accepts_only_the_actual_business_connection_and_explicit_ci_service",
+        "tests/integration/test_identity_business_outage.py::test_business_outage_rejects_wrong_database_container_or_runtime_target[identity-postgres]",
+        "tests/integration/test_identity_business_outage.py::test_business_outage_rejects_wrong_database_container_or_runtime_target[container-id]",
+        "tests/integration/test_identity_business_outage.py::test_business_outage_rejects_wrong_database_container_or_runtime_target[published-port]",
+        "tests/integration/test_identity_business_outage.py::test_business_outage_rejects_wrong_database_container_or_runtime_target[paused]",
+        "tests/integration/test_identity_business_outage.py::test_business_outage_rejects_wrong_database_container_or_runtime_target[sql-database]",
+        "tests/integration/test_identity_business_outage.py::test_business_outage_rejects_wrong_database_container_or_runtime_target[sql-user]",
+        "tests/integration/test_identity_business_outage.py::test_business_outage_rejects_wrong_database_container_or_runtime_target[dsn-host]",
+        "tests/integration/test_identity_recovery_control.py::test_root_control_requires_observed_quiescence_and_original_recovery_even_on_failure[success]",
+        "tests/integration/test_identity_recovery_control.py::test_root_control_requires_observed_quiescence_and_original_recovery_even_on_failure[quiescence-check-fails]",
+        "tests/integration/test_identity_recovery_control.py::test_root_control_requires_observed_quiescence_and_original_recovery_even_on_failure[restored-check-fails]",
+        "tests/integration/test_identity_recovery_control.py::test_root_control_rejects_a_stale_acknowledgment_and_still_requests_original_recovery",
+        "tests/integration/test_identity_recovery_control.py::test_recovery_plan_rejects_public_aliased_or_retained_control_before_any_service_operation[public-file]",
+        "tests/integration/test_identity_recovery_control.py::test_recovery_plan_rejects_public_aliased_or_retained_control_before_any_service_operation[symlink]",
+        "tests/integration/test_identity_recovery_control.py::test_recovery_plan_rejects_public_aliased_or_retained_control_before_any_service_operation[unfinished-previous-run]",
+        "tests/integration/test_identity_recovery_control.py::test_missing_recovery_owner_is_an_explicit_failure_before_native_or_business_work",
+        "tests/integration/test_identity_recovery_control.py::test_fresh_private_fixed_recovery_plan_can_be_read_without_any_native_dependency",
+        "tests/integration/test_identity_recovery_control.py::test_native_inventory_cannot_observe_an_unapproved_database_or_container[foreign-database]",
+        "tests/integration/test_identity_recovery_control.py::test_native_inventory_cannot_observe_an_unapproved_database_or_container[aliased-container]",
+        "tests/integration/test_identity_recovery_control.py::test_native_inventory_cannot_observe_an_unapproved_database_or_container[option-container]"
       ]
     },
     "bff": {
@@ -424,6 +444,16 @@
       "timeout_seconds": 600,
       "nodes": [
         "auth-runtime/tests/test_authenticated_restore.py::test_operator_restore_keeps_original_cookie_key_media_and_runtime_roles_without_changing_source"
+      ]
+    },
+    "coordinated-native-restore": {
+      "namespace": "auth30",
+      "origin": "http://127.0.0.1:4765",
+      "runtime": true,
+      "timeout_seconds": 1200,
+      "coordinated_restore": true,
+      "nodes": [
+        "auth-runtime/tests/test_native_identity_restore.py::test_coordinated_native_and_business_restore_preserves_oidc_saml_principals_old_cookie_keys_and_media"
       ]
     }
   }

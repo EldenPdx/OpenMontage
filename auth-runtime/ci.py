@@ -145,14 +145,51 @@ def owned_container(service):
     return value
 
 
+def validate_business_container(container, authorized_id, dsn, identity=None):
+    """Match the explicit fresh CI service to the actual BFF PostgreSQL connection."""
+    from psycopg.conninfo import conninfo_to_dict
+    error = "Required business PostgreSQL container does not match its dedicated CI connection"
+    try:
+        fields = conninfo_to_dict(dsn)
+        environment = dict(entry.split("=", 1) for entry in container["Config"]["Env"] if "=" in entry)
+        ports = container["NetworkSettings"]["Ports"]["5432/tcp"]
+        if (not re.fullmatch(r"[a-f0-9]{64}", authorized_id) or container["Id"] != authorized_id
+            or environment.get("POSTGRES_DB") != "studio_identity" or environment.get("POSTGRES_USER") != "auth32_ci_bootstrap"
+            or not container["State"]["Running"] or container["State"]["Paused"] or container["State"]["Health"]["Status"] != "healthy"
+            or fields.get("dbname") != "studio_identity" or fields.get("user") != "auth32_test" or fields.get("host") != "127.0.0.1"
+            or not ports or any(entry["HostIp"] not in {"0.0.0.0", "127.0.0.1", "::"} or entry["HostPort"] != fields.get("port") for entry in ports)
+            or identity is not None and identity != ("studio_identity", "auth32_test", 5432)):
+            raise RuntimeError(error)
+        return authorized_id
+    except (KeyError, TypeError, ValueError):
+        raise RuntimeError(error) from None
+
+
+def business_outage_container():
+    import psycopg
+    identifier = os.environ.get("STUDIO_TEST_POSTGRES_CONTAINER", "")
+    if not re.fullmatch(r"[a-f0-9]{64}", identifier):
+        raise RuntimeError("Required business PostgreSQL service ID is missing")
+    container = json.loads(subprocess.check_output(["docker", "inspect", identifier], text=True, stderr=subprocess.PIPE, timeout=15))[0]
+    dsn = os.environ["STUDIO_TEST_DATABASE_URL"]
+    validate_business_container(container, identifier, dsn)
+    with psycopg.connect(dsn, connect_timeout=3, options="-c statement_timeout=3000") as connection:
+        identity = connection.execute("SELECT current_database(),current_user,inet_server_port()").fetchone()
+    return validate_business_container(container, identifier, dsn, identity)
+
+
+def outage_container(service):
+    return business_outage_container() if service == "postgres" else owned_container("logto")
+
+
 def dependency_failures():
     cli = ROOT / ".runtime/pi/source/packages/coding-agent/dist/bundle/cli.js"
     if not cli.resolve().is_relative_to(ROOT / ".runtime/pi"):
         raise RuntimeError("Missing-dependency probes require an exclusively owned Pi installation")
     records = []
-    for dependency, service in (("logto", "logto"), ("identity-postgres", "identity-postgres"), ("idp", "keycloak"), ("mail", "mailpit")):
+    for dependency, service in (("logto", "logto"), ("identity-postgres", "identity-postgres"), ("business-postgres", None), ("idp", "keycloak"), ("mail", "mailpit")):
         dependencies([dependency])
-        container = owned_container(service)
+        container = owned_container(service) if service else business_outage_container()
         try:
             execute("pause-" + dependency, ["docker", "pause", container], timeout=15)
             execute("missing-" + dependency, [sys.executable, "-B", "auth-runtime/ci.py", "dependencies", "--dependency", dependency], timeout=20, expected_success=False)
@@ -227,8 +264,8 @@ def phase(name, definition):
     manifest, report = EVIDENCE / (name + "-nodes.json"), EVIDENCE / (name + "-result.json")
     private_json(manifest, {"nodes": nodes})
     arguments = [sys.executable, "-B", "-m", "pytest", "-p", "required", "-p", "no:cacheprovider", "-q", "--tb=short",
-                 "--required-nodes=" + str(manifest), "--required-report=" + str(report), "--basetemp=" + str(EVIDENCE / (name + "-tmp"))]
-    if definition["runtime"]:
+                 "--rootdir=" + str(ROOT), "--required-nodes=" + str(manifest), "--required-report=" + str(report), "--basetemp=" + str(EVIDENCE / (name + "-tmp"))]
+    if definition["runtime"] and not any(node.startswith("tests/") for node in nodes):
         arguments += ["-p", "tests.conftest"]
     arguments += sorted({node.split("::", 1)[0] for node in nodes})
     if not definition.get("outages"):
@@ -250,7 +287,7 @@ def phase(name, definition):
                     if value.get("phase") == "ready" and not paused:
                         if not re.fullmatch(r"[a-f0-9]{32}", value.get("scenario", "")) or value.get("service") not in {"logto", "postgres"}:
                             raise RuntimeError("Invalid private outage request")
-                        paused = owned_container("logto" if value["service"] == "logto" else "identity-postgres")
+                        paused = outage_container(value["service"])
                         execute("outage-pause", ["docker", "pause", paused], timeout=15)
                         private_json(control, {**value, "phase": "paused"})
                     elif value.get("phase") == "finished" and paused:

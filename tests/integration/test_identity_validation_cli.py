@@ -48,7 +48,7 @@ def run_required(tmp_path, body, *, nodes=None, extra=()):
     environment = {**os.environ, "PYTHONPATH": str(ROOT / "auth-runtime"), "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"}
     environment.pop("PYTEST_ADDOPTS", None)
     result = subprocess.run(
-        [sys.executable, "-B", "-m", "pytest", "-p", "required", "-p", "no:cacheprovider", "--tb=no",
+        [sys.executable, "-B", "-m", "pytest", "-p", "required", "-p", "no:cacheprovider", "--rootdir=.", "--tb=no",
          "--required-nodes=required.json", "--required-report=result.json", *extra, "test_input.py"],
         cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=15,
     )

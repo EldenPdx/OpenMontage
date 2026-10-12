@@ -24,6 +24,8 @@ Native Logto 1.44.0 OSS exposes a coarse `all` Management API scope. Do not desc
 
 Take coordinated, quiescent backups of the identity database, Keycloak database/configuration, business schema and canonical files/Pi sessions. Preserve the authority signing material, application/Management/IdP credentials, SSO policy overlay/version, exact issuer and private session-key ring separately. The OpenMontage archive intentionally excludes raw encryption keys; retaining only the archive cannot decrypt private sessions after restore. Record hashes and recovery order in the private operator ledger. Protect database dumps and raw mail/assertion/session evidence as secrets.
 
+The dedicated [Native recovery drill](identity-native-recovery.md) defines the required owner-only maintenance handshake, fresh empty clone targets, independent source-retention observations and actual OIDC/SAML/old-session/media checks. Its lifecycle helper and real execution are still pending; the earlier business-only restore rehearsal does not satisfy coordinated Native recovery.
+
 Use the released commands with absolute private path references:
 
 ```sh
