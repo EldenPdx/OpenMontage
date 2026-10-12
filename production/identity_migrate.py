@@ -22,7 +22,7 @@ from psycopg.types.json import Jsonb
 from pydantic import Field
 
 from production.contracts import (
-    ContractModel, ContractViolation, ResourceOwnership, Sha256, TaskRecord, UserIdentity,
+    ContractModel, ContractViolation, FileReference, ResourceOwnership, SessionReference, Sha256, TaskRecord, UserIdentity,
     WorkspaceContext, canonical_sha256,
 )
 from production.task_service import file_sha256
@@ -202,33 +202,94 @@ class OwnershipImporter:
             raise ContractViolation("PostgreSQL backup operation failed", "dependency_unavailable")
         return completed.stdout
 
+    def _database_references(self, connection):
+        tasks = connection.execute("SELECT task_id,project_id,record FROM tasks").fetchall()
+        projects = {row["project_id"] for row in tasks}
+        projects.update(row["project_id"] for row in connection.execute("SELECT project_id FROM project_owners"))
+        references = set()
+
+        def file_references(value, project_id):
+            if isinstance(value, dict):
+                if {"path", "revision", "sha256"} <= value.keys():
+                    reference = FileReference.model_validate({key: value[key] for key in ("path", "revision", "sha256")})
+                    references.add("projects/" + project_id + "/" + reference.path)
+                for child in value.values():
+                    file_references(child, project_id)
+            elif isinstance(value, list):
+                for child in value:
+                    file_references(child, project_id)
+
+        for row in tasks:
+            task = TaskRecord.model_validate(row["record"])
+            if (task.task_id, task.project_id) != (row["task_id"], row["project_id"]):
+                raise ContractViolation("Database task/project references differ", "file_conflict")
+            file_references(row["record"], row["project_id"])
+        for row in connection.execute("SELECT project_id,session FROM runs"):
+            projects.add(row["project_id"])
+            session = SessionReference.model_validate(row["session"])
+            references.add("runtime/sessions/" + session.path)
+        for row in connection.execute("SELECT response FROM requests"):
+            if "project_id" in row["response"]:
+                project_id = row["response"]["project_id"]
+                projects.add(project_id)
+                file_references(row["response"], project_id)
+        for table, column, condition in (("gates", "request", ""), ("events", "record", ""),
+                                         ("calls", "record", ""), ("file_intents", "record", " WHERE r.status IN ('applied','reconciled')")):
+            records = connection.execute(sql.SQL("SELECT t.project_id,r.{} AS record FROM {} r JOIN tasks t USING(task_id)" + condition)
+                                         .format(sql.Identifier(column), sql.Identifier(table)))
+            for row in records:
+                file_references(row["record"], row["project_id"])
+        references.update("projects/" + project_id + "/project.json" for project_id in projects)
+        return projects, references
+
     def backup(self, plan, directory, *, postgres_container=None):
         plan = OwnershipPlan.model_validate(plan)
         if plan.conflicts:
             raise ContractViolation("Resolve all import conflicts before backup", "state_conflict")
-        current = self.plan([item.mapping for item in plan.items])
-        if current.snapshot_sha256 != plan.snapshot_sha256:
-            raise ContractViolation("Import plan changed before backup", "state_conflict")
         directory = Path(directory).absolute()
         if directory.exists() or directory.is_symlink():
             raise ContractViolation("Backup destination must be new", "file_conflict")
         directory.mkdir(parents=True, mode=0o700)
         try:
-            dump = directory / "database.dump"
-            descriptor = os.open(dump, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(descriptor, "wb") as output:
-                self._postgres(["pg_dump", "--format=custom", "--no-owner", "--no-privileges", "--schema=" + self.repository.schema], postgres_container=postgres_container, stdout=output)
-                output.flush()
-                os.fsync(output.fileno())
-            for reference in plan.files:
-                source = self._source_file(reference)
-                target = directory / reference
-                target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-                shutil.copyfile(source, target)
-                target.chmod(0o600)
-            backup = BackupEvidence(directory=directory, schema_name=self.repository.schema, binding=self.repository.database_binding(),
-                                    mapping_sha256=plan.mapping_sha256, snapshot_sha256=plan.snapshot_sha256,
-                                    dump_sha256=file_sha256(dump), files=plan.files)
+            with ExitStack() as stack, self.repository._connection() as connection:
+                connection.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+                current = self._plan(connection, [item.mapping for item in plan.items], stack=stack)
+                if current.snapshot_sha256 != plan.snapshot_sha256:
+                    raise ContractViolation("Import plan changed before backup", "state_conflict")
+                if connection.execute("SELECT 1 FROM runs WHERE active OR lease_worker IS NOT NULL UNION ALL SELECT 1 FROM commands WHERE status IN ('pending','claimed') LIMIT 1").fetchone():
+                    raise ContractViolation("Schema backup requires all restored work to be quiescent", "state_conflict")
+                projects, references = self._database_references(connection)
+                mapped = {item.mapping.project_id for item in plan.items}
+                files = dict(plan.files)
+                for project_id in sorted(projects | mapped):
+                    project = self._project(project_id)
+                    if project_id not in mapped:
+                        self._writer_lock(project, stack)
+                    for path in sorted(project.rglob("*")):
+                        if path.is_symlink():
+                            raise ContractViolation("Backup project contains an alias", "file_conflict")
+                        if path.is_file() and path.name != MARKER and not path.name.startswith(MARKER + ".pending-"):
+                            files["projects/" + path.relative_to(self.projects_dir).as_posix()] = file_sha256(path)
+                for reference in references:
+                    files[reference] = file_sha256(self._source_file(reference))
+                snapshot = connection.execute("SELECT pg_export_snapshot() AS snapshot").fetchone()["snapshot"]
+                binding = str(connection.execute("SELECT binding_id FROM identity_binding WHERE singleton").fetchone()["binding_id"])
+                dump = directory / "database.dump"
+                descriptor = os.open(dump, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(descriptor, "wb") as output:
+                    self._postgres(["pg_dump", "--format=custom", "--no-owner", "--no-privileges", "--schema=" + self.repository.schema,
+                                    "--snapshot=" + snapshot], postgres_container=postgres_container, stdout=output)
+                    output.flush()
+                    os.fsync(output.fileno())
+                for reference in files:
+                    source = self._source_file(reference)
+                    target = directory / reference
+                    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                    shutil.copyfile(source, target)
+                    target.chmod(0o600)
+                backup = BackupEvidence(directory=directory, schema_name=self.repository.schema, binding=binding,
+                                        mapping_sha256=plan.mapping_sha256, snapshot_sha256=plan.snapshot_sha256,
+                                        dump_sha256=file_sha256(dump), files=files)
             descriptor = os.open(directory / "manifest.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(descriptor, "w") as output:
                 output.write(backup.model_dump_json(indent=2) + "\n")
@@ -362,6 +423,9 @@ class OwnershipImporter:
             raise ContractViolation("Restored data binding does not match backup", "file_conflict")
         with self.repository._connection() as connection:
             owners = connection.execute("SELECT project_id,ownership FROM project_owners WHERE ownership IS NOT NULL").fetchall()
+            _, references = self._database_references(connection)
+        if not references <= backup.files.keys():
+            raise ContractViolation("Restored database references are missing from archive; authenticated protection retained", "file_conflict")
         try:
             for owner in owners:
                 ownership = ResourceOwnership.model_validate(owner["ownership"])
@@ -377,6 +441,10 @@ class OwnershipImporter:
                     os.fsync(output.fileno())
                 if file_sha256(destination) != backup.files[reference]:
                     raise ContractViolation("Restored file verification failed", "file_conflict")
+            for reference in references:
+                destination = destinations[reference]
+                if not destination.is_file() or file_sha256(destination) != backup.files[reference]:
+                    raise ContractViolation("Restored references remain incomplete; authenticated protection retained", "file_conflict")
         except (GuardConflict, OSError):
             raise ContractViolation("Restore files remain incomplete; authenticated protection retained", "file_conflict") from None
 

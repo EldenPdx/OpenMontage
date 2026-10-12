@@ -11,7 +11,7 @@ from psycopg import sql
 from psycopg.types.json import Jsonb
 import pytest
 
-from production.contracts import ApprovalBinding, ApprovalDecision, ApprovalRequest, ApprovalScope, CallIntent, CostSnapshot, FileReference, FileWriteIntent, StudioEvent, TaskCommand, TaskCreate, TaskRecord, canonical_sha256
+from production.contracts import ApprovalBinding, ApprovalDecision, ApprovalRequest, ApprovalScope, CallIntent, CostSnapshot, FileReference, FileWriteIntent, RenderResult, StudioEvent, TaskCommand, TaskCreate, TaskRecord, canonical_sha256
 from production.repository import PostgresRepository
 from tests.integration.test_studio_repository import snapshot
 
@@ -78,6 +78,148 @@ def journals(repo):
 def bytes_on_disk(*roots):
     from production.ownership_guard import MARKER
     return {str(path): path.read_bytes() for root in roots for path in root.rglob("*") if path.is_file() and path.name != MARKER}
+
+
+@pytest.fixture
+def two_projects(legacy):
+    repo, projects, runtime = legacy
+    project = projects / "unmapped-project"
+    project.mkdir()
+    (project / "project.json").write_bytes(b'{"project_id":"unmapped-project"}\n')
+    (project / "artifacts").mkdir()
+    (project / "artifacts/render_report.json").write_bytes(b'{"preservation_fixture":true}\n')
+    # Binary sentinels prove exact preservation, not valid-video production.
+    (project / "render.mp4").write_bytes(b"\x00\xff\x80unmapped-output\r\n")
+    (projects / "legacy-project" / "source.bin").write_bytes(b"\x00\xfelegacy-source\r\n")
+    session = runtime / "sessions/task-unmapped/run-unmapped/session.jsonl"
+    session.parent.mkdir(parents=True)
+    session.write_bytes(b'{"type":"session","id":"unmapped-exact-session"}\n')
+    result = RenderResult(render_report=FileReference(path="artifacts/render_report.json", revision=2,
+                              sha256=sha256((project / "artifacts/render_report.json").read_bytes()).hexdigest()),
+                          video=FileReference(path="render.mp4", revision=2, sha256=sha256((project / "render.mp4").read_bytes()).hexdigest()),
+                          bytes=(project / "render.mp4").stat().st_size, duration_seconds=1, width=1, height=1, verified=True)
+    task = TaskRecord(task_id="task-unmapped", project_id="unmapped-project", run_id="run-unmapped", version=4,
+                      state="cancelled", request=TaskCreate(brief="Second historical production", profile_id="local"),
+                      config_snapshot=snapshot(), result=result)
+    with psycopg.connect(os.environ["STUDIO_TEST_DATABASE_URL"]) as connection:
+        connection.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(repo.schema)))
+        connection.execute("INSERT INTO tasks(task_id,project_id,run_id,version,state,record) VALUES ('task-unmapped','unmapped-project','run-unmapped',4,'cancelled',%s)",
+                           (Jsonb(task.model_dump(mode="json", exclude={"ownership", "actor"})),))
+        connection.execute("INSERT INTO runs(run_id,task_id,project_id,session,active) VALUES ('run-unmapped','task-unmapped','unmapped-project',%s,false)",
+                           (Jsonb({"path": "task-unmapped/run-unmapped/session.jsonl", "session_id": "unmapped-exact-session"}),))
+    yield legacy
+
+
+@pytest.mark.parametrize("unmapped_owned", [False, True])
+def test_subset_mapping_cli_backup_restores_every_project_output_and_exact_session(two_projects, tmp_path, unmapped_owned):
+    import subprocess
+    import sys
+    from production.contracts import ResourceOwnership, SessionReference, WorkspaceContext
+    from production.ownership_guard import has_guard, mark_authenticated
+    from tests.integration.test_identity_persistence import identity_store
+    repo, projects, runtime = two_projects
+    repo.migrate()
+    user = identity_store(repo).resolve_user("https://identity.test/oidc", "mapped-creator")
+    ownership = None
+    if unmapped_owned:
+        creator = identity_store(repo).resolve_user("https://identity.test/oidc", "unmapped-creator")
+        workspace = WorkspaceContext(kind="personal", owner_id=creator.user_id)
+        ownership = ResourceOwnership(workspace=workspace, creator=creator)
+        mark_authenticated(projects, binding=repo.database_binding())
+        mark_authenticated(projects / "unmapped-project", binding=repo.database_binding(), workspace=workspace.model_dump())
+        task = repo.get_task("task-unmapped").model_copy(update={"ownership": ownership})
+        with psycopg.connect(os.environ["STUDIO_TEST_DATABASE_URL"]) as connection:
+            connection.execute(sql.SQL("UPDATE {}.tasks SET record=%s,workspace_kind='personal',owner_id=%s WHERE task_id='task-unmapped'").format(sql.Identifier(repo.schema)),
+                               (Jsonb(task.model_dump(mode="json")), creator.user_id))
+            connection.execute(sql.SQL("UPDATE {}.project_owners SET workspace_kind='personal',owner_id=%s,ownership=%s WHERE project_id='unmapped-project'").format(sql.Identifier(repo.schema)),
+                               (creator.user_id, Jsonb(ownership.model_dump(mode="json"))))
+    mapping = tmp_path / "mapping.json"
+    mapping.write_text(json.dumps([{"project_id": "legacy-project", "creator_user_id": user.user_id,
+                                    "workspace": {"kind": "personal", "owner_id": user.user_id}}]))
+    private = json.loads(Path('/tmp/openmontage-auth-20261012/persistence-private.json').read_text())
+    configuration = tmp_path / "operator-private.json"
+    configuration.write_text(json.dumps({"database_url": os.environ["STUDIO_TEST_DATABASE_URL"], "postgres_container": private["container"]}))
+    configuration.chmod(0o600)
+    archive = tmp_path.resolve() / "backup"
+    original = {str(path.relative_to(root)): path.read_bytes() for root in (projects, runtime) for path in root.rglob("*") if path.is_file()}
+    before, binding = journals(repo), repo.database_binding()
+    def command(action, project_root, runtime_root):
+        args = [sys.executable, "-B", "-m", "production.identity_migrate", action, "--private-config", str(configuration),
+                "--schema", repo.schema, "--projects-root", str(project_root), "--runtime-root", str(runtime_root), "--backup", str(archive)]
+        if action == "backup":
+            args += ["--mapping", str(mapping)]
+        return subprocess.run(args, capture_output=True, text=True, check=False)
+    backed_up = command("backup", projects, runtime)
+    assert backed_up.returncode == 0, backed_up.stderr
+    with psycopg.connect(os.environ["STUDIO_TEST_DATABASE_URL"]) as connection:
+        connection.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(repo.schema)))
+    restored_projects, restored_runtime = tmp_path / "restored-projects", tmp_path / "restored-runtime"
+    restored = command("restore", restored_projects, restored_runtime)
+    assert restored.returncode == 0, restored.stderr
+    assert len(repo.list_tasks()) == 2 and journals(repo) == before
+    assert repo.database_binding() == binding and has_guard(restored_projects)
+    for source, target in ((projects, restored_projects), (runtime, restored_runtime)):
+        for path in source.rglob("*"):
+            if path.is_file():
+                destination = target / path.relative_to(source)
+                assert destination.is_file(), f"Successful restore left a dangling reference: {path.relative_to(source)}"
+                assert destination.read_bytes() == original[str(path.relative_to(source))] == path.read_bytes()
+                assert sha256(destination.read_bytes()).hexdigest() == sha256(path.read_bytes()).hexdigest()
+    task = repo.get_task("task-unmapped")
+    assert task.ownership == ownership and task.actor is None
+    if ownership:
+        assert repo.project_ownership(task.project_id, ownership.workspace) == ownership
+        assert has_guard(restored_projects / task.project_id)
+    for reference in (task.result.video, task.result.render_report):
+        assert sha256((restored_projects / task.project_id / reference.path).read_bytes()).hexdigest() == reference.sha256
+    with psycopg.connect(os.environ["STUDIO_TEST_DATABASE_URL"]) as connection:
+        sessions = connection.execute(sql.SQL("SELECT session FROM {}.runs").format(sql.Identifier(repo.schema))).fetchall()
+    for row in sessions:
+        session = SessionReference.model_validate(row[0])
+        assert (restored_runtime / "sessions" / session.path).read_bytes() == (runtime / "sessions" / session.path).read_bytes()
+    manifest = json.loads((archive / "manifest.json").read_text())
+    for reference, digest in manifest["files"].items():
+        assert sha256((archive / reference).read_bytes()).hexdigest() == digest
+
+
+@pytest.mark.parametrize("omitted", ["project", "video", "session"])
+def test_restore_cli_rejects_old_subset_archive_and_retains_binding_and_protection(two_projects, tmp_path, omitted):
+    import subprocess
+    import sys
+    from production.identity_migrate import OwnershipImporter
+    from production.ownership_guard import has_guard
+    from tests.integration.test_identity_persistence import identity_store
+    repo, projects, runtime = two_projects
+    repo.migrate()
+    user = identity_store(repo).resolve_user("https://identity.test/oidc", "mapped-creator")
+    mapping = [{"project_id": "legacy-project", "creator_user_id": user.user_id,
+                "workspace": {"kind": "personal", "owner_id": user.user_id}}]
+    private = json.loads(Path('/tmp/openmontage-auth-20261012/persistence-private.json').read_text())
+    importer = OwnershipImporter(repo, projects_dir=projects, runtime_root=runtime)
+    backup = importer.backup(importer.plan(mapping), tmp_path.resolve() / "backup", postgres_container=private["container"])
+    # Reproduce the old schema-wide dump with only the mapped file inventory.
+    manifest = json.loads((backup.directory / "manifest.json").read_text())
+    missing = {"video": "projects/unmapped-project/render.mp4", "session": "runtime/sessions/task-unmapped/run-unmapped/session.jsonl"}
+    manifest["files"] = {reference: digest for reference, digest in manifest["files"].items()
+                         if not (reference.startswith("projects/unmapped-project/") if omitted == "project" else reference == missing[omitted])}
+    (backup.directory / "manifest.json").write_text(json.dumps(manifest))
+    original, before = bytes_on_disk(projects, runtime), journals(repo)
+    configuration = tmp_path / "operator-private.json"
+    configuration.write_text(json.dumps({"database_url": os.environ["STUDIO_TEST_DATABASE_URL"], "postgres_container": private["container"]}))
+    configuration.chmod(0o600)
+    with psycopg.connect(os.environ["STUDIO_TEST_DATABASE_URL"]) as connection:
+        connection.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(repo.schema)))
+    restored_projects, restored_runtime = tmp_path / "restored-projects", tmp_path / "restored-runtime"
+    command = [sys.executable, "-B", "-m", "production.identity_migrate", "restore", "--private-config", str(configuration),
+               "--schema", repo.schema, "--projects-root", str(restored_projects), "--runtime-root", str(restored_runtime),
+               "--backup", str(backup.directory)]
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    assert result.returncode != 0, "Incomplete schema archive must not report a successful restore"
+    assert "file_conflict" in result.stderr and "restore complete" not in result.stdout
+    assert os.environ["STUDIO_TEST_DATABASE_URL"] not in result.stdout + result.stderr
+    assert has_guard(restored_projects) and repo.database_binding() == backup.binding
+    assert len(repo.list_tasks()) == 2 and journals(repo) == before
+    assert bytes_on_disk(projects, runtime) == original
 
 
 def test_populated_v2_upgrade_and_dry_run_preserve_journals_and_canonical_bytes(legacy):
