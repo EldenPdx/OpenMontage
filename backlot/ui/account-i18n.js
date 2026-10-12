@@ -31,7 +31,7 @@ registerMessages({
     "The previous request outcome is unconfirmed. Refresh this task before choosing another action.": "上次请求的结果尚未确认。请刷新后再选择其他操作。",
     "Connection lost. The request key is saved; retry this same action to confirm its outcome.": "连接已断开。请求标识已保存，请重试相同操作以确认结果。",
     "The service response is unconfirmed. The request key is saved; retry this same action.": "服务响应尚未确认。请求标识已保存，请重试相同操作。",
-    "Enter a valid email address.": "请输入有效的邮箱地址。", "Complete this field.": "请填写此字段。", "Project library": "项目库",
+    "Enter a valid email address.": "请输入有效的邮箱地址。", "Complete this field.": "请填写此项。", "Project library": "项目库",
   },
   ja: {
     "Account": "アカウント", "Workspace": "ワークスペース", "Personal workspace": "個人スペース", "Local workspace": "ローカルスペース",
