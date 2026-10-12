@@ -83,7 +83,7 @@ def test_real_pi_batches_completed_edit_before_its_dependent_ffmpeg_render(tmp_p
             worker = Worker(repo, config, runtime, projects, environment=environment, registry=registry)
             app = create_app(studio_repository=repo, studio_config=config, studio_environment=environment)
             app.state.studio_projects_dir = projects
-            with TestClient(app, base_url="http://127.0.0.1") as client:
+            with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 12345)) as client:
                 token = client.get("/api/studio/config").json()["csrf_token"]
                 headers = {"Origin": "http://127.0.0.1", "X-CSRF-Token": token, "Idempotency-Key": "batch-create-0001"}
                 response = client.post("/api/studio/tasks", headers=headers,
