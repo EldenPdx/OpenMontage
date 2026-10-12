@@ -22,6 +22,23 @@ def file_sha256(path):
     return digest.hexdigest()
 
 
+def protect_owned_project(repository, projects_dir, context):
+    if context.ownership is None:
+        return
+    from production.ownership_guard import GuardConflict, mark_authenticated
+    repository.assert_fence(context)
+    root = Path(projects_dir).resolve()
+    project = root / context.project_id
+    if project.resolve() != project:
+        raise ContractViolation("Task project is a filesystem alias", "file_conflict")
+    binding = repository.database_binding()
+    try:
+        mark_authenticated(root, binding=binding)
+        mark_authenticated(project, binding=binding, workspace=context.ownership.workspace.model_dump())
+    except (GuardConflict, OSError):
+        raise ContractViolation("Owned protection could not be established", "file_conflict") from None
+
+
 class ArtifactStore:
     def __init__(self, repository, projects_dir: Path):
         self.repository = repository
@@ -38,6 +55,7 @@ class ArtifactStore:
     def initialize(self, context, *, title, pipeline_type):
         from lib.checkpoint import init_project, studio_checkpoint_authority
         self.repository.assert_fence(context)
+        protect_owned_project(self.repository, self.projects_dir, context)
         project = self.project(context)
         with studio_checkpoint_authority(lambda: self.repository.assert_fence(context)):
             init_project(context.project_id, title=title, pipeline_type=pipeline_type, pipeline_dir=self.projects_dir)
