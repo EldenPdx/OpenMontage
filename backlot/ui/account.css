@@ -1,0 +1,19 @@
+.account-control { max-width:1680px; margin:0 auto; padding:16px 36px; display:flex; flex-wrap:wrap; gap:12px; align-items:center; border-bottom:1px solid var(--border); color:var(--text-2); font-size:calc(12px * var(--fs-scale)); overflow-wrap:anywhere; }
+.account-identity { color:var(--text); }
+.account-email { display:block; color:var(--text-2); font-size:calc(11px * var(--fs-scale)); }
+.account-control button, .account-control select { padding:9px 12px; border:1px solid var(--border); border-radius:5px; background:var(--surface-2); color:var(--text); font:inherit; max-width:100%; }
+.account-control button { cursor:pointer; }
+.account-control :focus-visible { outline:2px solid var(--blue); outline-offset:3px; }
+.account-space, .account-explanation, #account-status { flex-basis:100%; }
+.account-management { flex-basis:100%; }
+.account-management summary { cursor:pointer; color:var(--text); }
+.account-management h2 { font-size:calc(14px * var(--fs-scale)); margin:18px 0 10px; }
+.account-management form { display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:14px 0; }
+.account-management input { border:1px solid var(--border); border-radius:5px; padding:10px; background:var(--surface-2); color:var(--text); font:inherit; max-width:100%; }
+.account-list { list-style:none; padding:0; }
+.account-list li { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--border); }
+.account-list li > span { flex:1 1 180px; }
+.account-error { color:var(--red); flex-basis:100%; }
+#invitation-actions { display:flex; flex-wrap:wrap; gap:12px; margin-top:24px; }
+#invitation-actions button { background:var(--surface-2); color:var(--text); border:1px solid var(--border); padding:10px 14px; border-radius:5px; font:inherit; cursor:pointer; }
+@media(max-width:480px) { .account-control { padding:14px 18px; } }

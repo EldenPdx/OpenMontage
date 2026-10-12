@@ -21,7 +21,7 @@ export function localePath(path, locale = getLocale()) {
   const url = new URL(path, origin);
   if (url.origin !== origin) return path;
   const page = url.pathname.replace(/^\/(zh|ja|en)(?=\/|$)/, "") || "/";
-  if (!/^(\/|\/studio\/?|\/p\/.+)$/.test(page)) return path;
+  if (!/^(\/|\/studio\/?|\/p\/.+|\/invitations\/accept)$/.test(page)) return path;
   const language = LOCALES.includes(locale) ? locale : "zh";
   return `/${language}${page === "/" ? "" : page}${url.search}${url.hash}`;
 }
