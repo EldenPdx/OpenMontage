@@ -2,6 +2,7 @@
 
 import json
 import os
+from hashlib import sha256
 from pathlib import Path
 import secrets
 import stat
@@ -9,17 +10,26 @@ from uuid import UUID
 
 
 MARKER = ".openmontage-authenticated"
+WITNESS_PREFIX = ".openmontage-auth-root-"
 
 
 class GuardConflict(RuntimeError):
     """Protection cannot be safely established or matched to this data binding."""
 
 
+def _witness(directory):
+    return directory.parent / (WITNESS_PREFIX + sha256(os.fsencode(directory)).hexdigest() + ".json")
+
+
 def has_guard(directory):
     try:
-        os.lstat(Path(directory).resolve() / MARKER)
-        return True
-    except FileNotFoundError:
+        directory = Path(directory).resolve()
+        for marker in (directory / MARKER, _witness(directory)):
+            try:
+                os.lstat(marker)
+                return True
+            except FileNotFoundError:
+                pass
         return False
     except (OSError, RuntimeError):
         return True
@@ -39,7 +49,8 @@ def _classification(binding, workspace):
 
 def _existing(marker, expected):
     try:
-        descriptor = os.open(marker, os.O_RDONLY | os.O_NOFOLLOW)
+        # Reject an unsafe FIFO without blocking before fstat validation.
+        descriptor = os.open(marker, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(descriptor, "rb") as content:
             info = os.fstat(content.fileno())
             if not stat.S_ISREG(info.st_mode) or info.st_size > 4096 or info.st_mode & 0o077:
@@ -52,17 +63,13 @@ def _existing(marker, expected):
         raise GuardConflict("Authenticated marker cannot be verified") from None
 
 
-def mark_authenticated(directory, *, binding, workspace=None):
-    expected = _classification(binding, workspace)
+def _persist(marker, expected):
     temporary = None
     try:
-        directory = Path(directory).resolve()
-        directory.mkdir(parents=True, exist_ok=True)
-        marker = directory / MARKER
-        if has_guard(directory):
-            _existing(marker, expected)
-        else:
-            temporary = directory / (MARKER + ".pending-" + secrets.token_hex(16))
+        try:
+            os.lstat(marker)
+        except FileNotFoundError:
+            temporary = marker.parent / (marker.name + ".pending-" + secrets.token_hex(16))
             descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
             with os.fdopen(descriptor, "wb") as content:
                 content.write((json.dumps(expected, sort_keys=True) + "\n").encode("utf-8"))
@@ -72,7 +79,9 @@ def mark_authenticated(directory, *, binding, workspace=None):
                 os.link(temporary, marker)
             except FileExistsError:
                 _existing(marker, expected)
-        descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+        else:
+            _existing(marker, expected)
+        descriptor = os.open(marker.parent, os.O_RDONLY | os.O_DIRECTORY)
         try:
             os.fsync(descriptor)
         finally:
@@ -84,3 +93,23 @@ def mark_authenticated(directory, *, binding, workspace=None):
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+def mark_authenticated(directory, *, binding, workspace=None):
+    expected = _classification(binding, workspace)
+    try:
+        directory = Path(directory).resolve()
+        directory.mkdir(parents=True, exist_ok=True)
+        marker = directory / MARKER
+        try:
+            os.lstat(marker)
+        except FileNotFoundError:
+            pass
+        else:
+            _existing(marker, expected)
+        _persist(_witness(directory), expected)
+        _persist(marker, expected)
+    except (OSError, RuntimeError, UnicodeError) as error:
+        if isinstance(error, GuardConflict):
+            raise
+        raise GuardConflict("Authenticated protection could not be persisted") from None
