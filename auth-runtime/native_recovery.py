@@ -59,9 +59,9 @@ class RecoveryOperator:
         self.archives = {}
         self.log = os.fdopen(os.open(self.control / "operator.log", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb")
 
-    def command(self, arguments, *, payload=None, timeout=120):
+    def command(self, arguments, *, payload=None, timeout=120, cwd=None):
         environment = {**os.environ, "AUTH_STATE_DIR": str(self.owner)}
-        result = subprocess.run(arguments, cwd=self.owner_root, env=environment, input=payload,
+        result = subprocess.run(arguments, cwd=cwd or self.owner_root, env=environment, input=payload,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
         self.log.write(result.stderr)
         self.log.flush()
@@ -183,7 +183,7 @@ class RecoveryOperator:
                 "--runtime-root", str(Path(self.manifest[side + "_root"]) / "worker-runtime"), "--backup", self.manifest["business_backup"]]
             if command == "backup":
                 arguments += ["--mapping", self.manifest["mapping"]]
-            self.command(arguments)
+            self.command(arguments, cwd=ROOT)
         for service, filename, key in (("logto", "logto.env", "DB_URL"), ("keycloak", "keycloak.env", "KC_DB_URL")):
             lines = self.originals[service].decode().splitlines()
             changed = []
