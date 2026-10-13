@@ -155,7 +155,12 @@ def test_two_real_sessions_refresh_independently_and_survive_bff_restart(identit
                 store.update_session(cookie["value"], expected_revision=session.metadata.revision, sdk_storage=values)
                 refreshed = first.request.get(ORIGIN + "/api/auth/me")
                 assert refreshed.status == 200 and refreshed.json()["user"] == one["user"]
+                refreshed_tokens = json.loads(store.get_session(cookie["value"]).sdk_storage["accessTokenMap"])
+                assert refreshed_tokens["x"][""]["expiresAt"] > time.time()
                 assert second.request.get(ORIGIN + "/api/auth/me").json()["user"] == two["user"]
+                # End page SSE transports while retaining both sessions across the BFF restart.
+                for page in first.pages + second.pages:
+                    page.close()
             with serving(create_app(), port=4760):
                 restored_one = first.request.get(ORIGIN + "/api/auth/me")
                 restored_two = second.request.get(ORIGIN + "/api/auth/me")
