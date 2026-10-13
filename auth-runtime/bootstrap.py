@@ -35,7 +35,7 @@ def main():
     STATE.chmod(0o700)
     private_python = STATE / "venv/bin/python"
     environment = {**os.environ, "UV_CACHE_DIR": str(STATE / "uv-cache"), "PYTHONDONTWRITEBYTECODE": "1"}
-    uv = shutil.which("uv")
+    uv = shutil.which("uv") or shutil.which("uv", path=sysconfig.get_path("scripts"))
     if not private_python.exists():
         if not uv:
             raise SystemExit("Install uv to prepare the separate auth venv")
