@@ -284,11 +284,14 @@ def test_cleanup_refuses_a_live_native_recovery_operator(tmp_path):
     (runtime / "native_recovery.py").write_text("import time\ntime.sleep(30)\n")
     evidence = runtime / ".state/validation"
     evidence.mkdir(parents=True)
-    plan = evidence / "plan.json"
+    plan = evidence / ("long-plan-segment-" * 8) / "plan.json"
+    plan.parent.mkdir()
+    plan.write_text("{}")
     operator = subprocess.Popen([sys.executable, "-B", "auth-runtime/native_recovery.py", "serve", "--plan", str(plan)], cwd=tmp_path)
     try:
         (evidence / "active-native-recovery.json").write_text(json.dumps({"pid": operator.pid, "plan": str(plan)}))
         result = subprocess.run([sys.executable, "-B", str(runtime / "ci.py"), "cleanup"], cwd=tmp_path,
+                                env={**os.environ, "COLUMNS": "60"},
                                 capture_output=True, text=True, timeout=10)
         assert result.returncode != 0
         assert result.stderr.strip() == "Native recovery operator is still active; verify original recovery before cleanup"

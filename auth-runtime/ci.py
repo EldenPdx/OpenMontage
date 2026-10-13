@@ -379,7 +379,7 @@ def cleanup():
         value = json.loads(active.read_text())
         if type(value.get("pid")) is not int or value["pid"] <= 0 or not isinstance(value.get("plan"), str):
             raise RuntimeError("Invalid retained Native recovery operator record; verify original recovery before cleanup")
-        observed = subprocess.run(["ps", "-p", str(value["pid"]), "-o", "args="], capture_output=True, text=True, timeout=5)
+        observed = subprocess.run(["ps", "-ww", "-p", str(value["pid"]), "-o", "args="], capture_output=True, text=True, timeout=5)
         if observed.returncode == 0 and "auth-runtime/native_recovery.py serve" in observed.stdout and value["plan"] in observed.stdout:
             raise RuntimeError("Native recovery operator is still active; verify original recovery before cleanup")
     import manage
