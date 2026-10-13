@@ -7,7 +7,7 @@
     "Same-email identities from separate identity providers",
     "Forged cookies, CSRF, host/origin/proxy headers, actor fields and invitation tickets",
     "Ciphertext substitution, path/symlink escape and active HTML/SVG inputs",
-    "Owner-controlled dependency/service outages, mail throttling, response-loss and authority fault injection"
+    "Owner-controlled dependency/service outages, mail throttling, native Management response-loss and authority fault injection"
   ],
   "functions": [
     "auth-runtime/tests/test_bff_oidc_faults.py::test_nonfinite_id_token_date_is_rejected_as_unverified_identity",
@@ -66,7 +66,9 @@
     "auth-runtime/tests/test_organizations_recovery.py::test_other_429_retains_unknown_outcome_without_another_native_post",
     "auth-runtime/tests/test_organizations_recovery.py::test_invitation_terminal_response_loss_reconciles_once_after_restart",
     "auth-runtime/tests/test_organizations_recovery.py::test_management_read_outage_restarts_and_completes_one_real_invitation",
-    "auth-runtime/tests/test_organizations_recovery.py::test_changed_role_template_cannot_create_and_recovers_after_fixed_authority"
+    "auth-runtime/tests/test_organizations_recovery.py::test_changed_role_template_cannot_create_and_recovers_after_fixed_authority",
+    "auth-runtime/tests/test_ui_accounts.py::test_active_account_can_revoke_its_session_when_identity_reads_are_unavailable",
+    "auth-runtime/tests/test_ui_accounts.py::test_authority_recovery_focus_restores_studio_in_the_verified_context"
   ],
   "nodes": [
     "auth-runtime/tests/test_studio_auth28.py::test_long_verified_result_stops_before_remaining_bytes_after_logout[outage]"
