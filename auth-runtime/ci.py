@@ -260,6 +260,9 @@ def phase(name, definition):
     environment = {**os.environ, "PYTHONPATH": os.pathsep.join((str(ROOT), str(ROOT / "auth-runtime"))),
                    "STUDIO_REQUIRE_INTEGRATION": "1", "PYTHONDONTWRITEBYTECODE": "1", "PYTHON_DOTENV_DISABLED": "1",
                    "AUTH_SSO_VENDOR_ROOT": str(STATE / "sso-vendor")}
+    temporary = EVIDENCE / (name + "-tmp-" + secrets.token_hex(8))
+    temporary.mkdir(mode=0o700, parents=True)
+    environment["TMPDIR"] = str(temporary)
     for key in ("OPENMONTAGE_ALLOW_NETWORK", "STUDIO_XVAN_LIVE_SMOKE", "STUDIO_XVAN_PAID_APPROVED", "OPENMONTAGE_AUTH_CONFIG_FILE", "OPENMONTAGE_AUTH_MODE", "PYTEST_ADDOPTS"):
         environment.pop(key, None)
     if definition.get("database_config"):
@@ -300,7 +303,7 @@ def phase(name, definition):
     manifest, report = EVIDENCE / (name + "-nodes.json"), EVIDENCE / (name + "-result.json")
     private_json(manifest, {"nodes": nodes})
     arguments = [sys.executable, "-B", "-m", "pytest", "-p", "required", "-p", "no:cacheprovider", "-q", "--tb=short",
-                 "--rootdir=" + str(ROOT), "--required-nodes=" + str(manifest), "--required-report=" + str(report), "--basetemp=" + str(EVIDENCE / (name + "-tmp"))]
+                 "--rootdir=" + str(ROOT), "--required-nodes=" + str(manifest), "--required-report=" + str(report), "--basetemp=" + str(temporary / "pytest")]
     if definition["runtime"] and not any(node.startswith("tests/") for node in nodes):
         arguments += ["-p", "tests.conftest"]
     if definition.get("suite") == "manual-security":

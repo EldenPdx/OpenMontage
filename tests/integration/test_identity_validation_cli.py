@@ -226,6 +226,36 @@ def test_required_phase_runs_only_the_exact_reviewed_nodes(tmp_path):
     assert report["passed"] is True and set(report["nodes"]) == {"test_entry.py::test_reviewed"}
 
 
+def test_required_phases_use_fresh_private_standard_library_temp_roots(tmp_path):
+    runtime = tmp_path / "auth-runtime"
+    runtime.mkdir()
+    for name in ("ci.py", "required.py"):
+        shutil.copyfile(ROOT / "auth-runtime" / name, runtime / name)
+    (tmp_path / "requirements-auth.txt").write_text("logto==0.2.1\n")
+    old = tmp_path / "caller-temp"
+    old.mkdir()
+    (old / "retained.txt").write_text("retained caller data")
+    (tmp_path / "test_entry.py").write_text(
+        "import os,tempfile\nfrom pathlib import Path\ndef test_reviewed():\n"
+        "    with tempfile.TemporaryDirectory() as name:\n"
+        "        parent=Path(name).parent\n"
+        "        assert str(parent)!=os.environ['CALLER_TEMP']\n"
+        "        assert parent.stat().st_mode & 0o777 == 0o700\n"
+        "        Path('observed.txt').write_text(str(parent))\n")
+    definition = {"runtime": False, "timeout_seconds": 10, "nodes": ["test_entry.py::test_reviewed"]}
+    script = "import sys;sys.path.insert(0,'auth-runtime');import ci;ci.phase('tracer'," + repr(definition) + ")"
+    environment = {**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "TMPDIR": str(old), "CALLER_TEMP": str(old)}
+    environment.pop("PYTEST_ADDOPTS", None)
+    observed = []
+    for _ in range(2):
+        result = subprocess.run([sys.executable, "-B", "-c", script], cwd=tmp_path, env=environment,
+                                capture_output=True, text=True, timeout=15)
+        assert result.returncode == 0, result.stderr
+        observed.append((tmp_path / "observed.txt").read_text())
+    assert observed[0] != observed[1]
+    assert (old / "retained.txt").read_text() == "retained caller data"
+
+
 @pytest.mark.parametrize("operator_exit", [0, 7], ids=("operator-restored", "operator-failed"))
 def test_coordinated_phase_requires_its_recovery_operator_to_succeed(tmp_path, operator_exit):
     runtime = tmp_path / "auth-runtime"
