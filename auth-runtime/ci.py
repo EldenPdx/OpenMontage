@@ -391,6 +391,11 @@ def cleanup():
     execute("cleanup", [sys.executable, "-B", "auth-runtime/manage.py", "down"], timeout=120)
 
 
+def sso_subject_proof(principal, memberships):
+    return {"native_subject": principal["native_subject"], "connector_id": principal["connector_id"],
+            "identity_id": principal["sso_identity_id"], "issuer": principal["sso_issuer"], "memberships": memberships}
+
+
 def prepare_sso():
     paths = (STATE / "credentials.json", STATE / "fixture-auth30.json")
     if not STATE.is_dir() or STATE.resolve() != STATE or STATE.stat().st_mode & 0o077 or any(
@@ -409,14 +414,14 @@ def prepare_sso():
             principal = sso.record_principal(context, protocol)
             if principal["email"] != principal["fixture_idp_email"] or principal["native_subject"] in {user.id for user in sso.fixture.users.values()}:
                 raise RuntimeError("Fresh enterprise fixture identity did not bind its actual standard IdP subject")
+            proof = sso_subject_proof(principal, {})
             previous = saved.get(protocol)
-            if previous and any(previous[key] != principal[key] for key in ("connector_id", "native_subject", "sso_identity_id", "sso_issuer")):
+            if previous and any(previous[key] != proof[key] for key in ("connector_id", "native_subject", "identity_id", "issuer")):
                 raise RuntimeError("Frozen enterprise fixture principal changed")
-            saved[protocol] = principal
+            saved[protocol] = proof
             context.close()
         if saved["oidc"]["native_subject"] == saved["saml"]["native_subject"]:
             raise RuntimeError("Standard fixture protocols require distinct actual enterprise identities")
-        private_json(sso.fixture.path, sso.fixture._data)
         for protocol, organization, role in (("oidc", "A", "editor"), ("saml", "A", "viewer"), ("saml", "B", "editor")):
             organization_id, subject = sso.fixture.organizations[organization], saved[protocol]["native_subject"]
             members = sso.fixture.api.items("/api/organizations/" + organization_id + "/users")
@@ -428,11 +433,13 @@ def prepare_sso():
             current = sso.me(context)
             if current["role"] != role or current["workspace"]["key"] != "organization:" + organization_id:
                 raise RuntimeError("Actual enterprise membership did not reach its explicitly granted BFF role")
+            saved[protocol]["memberships"][organization] = [role]
             if role == "editor":
                 task = sso.create(context)
                 if context.request.get("http://127.0.0.1:4765/api/studio/tasks/" + task["task_id"]).status != 200:
                     raise RuntimeError("Enterprise fixture member cannot read its actual owned resource")
             context.close()
+        private_json(sso.fixture.path, sso.fixture._data)
 
 
 def publish():
