@@ -220,7 +220,8 @@
         "tests/integration/test_identity_validation_cli.py::test_coordinated_phase_requires_its_recovery_operator_to_succeed[operator-restored]",
         "tests/integration/test_identity_validation_cli.py::test_coordinated_phase_requires_its_recovery_operator_to_succeed[operator-failed]",
         "tests/integration/test_identity_recovery_control.py::test_native_recovery_operator_prepares_a_fresh_private_plan_without_services",
-        "tests/integration/test_identity_validation_cli.py::test_external_review_can_collect_ordinary_tests_with_the_project_plugin"
+        "tests/integration/test_identity_validation_cli.py::test_external_review_can_collect_ordinary_tests_with_the_project_plugin",
+        "tests/integration/test_identity_validation_cli.py::test_recorded_sso_proof_uses_the_recovery_consumer_schema"
       ]
     },
     "bff": {

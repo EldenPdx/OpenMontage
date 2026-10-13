@@ -232,6 +232,19 @@ def test_sso_fixture_setup_requires_the_private_lifecycle_owner(tmp_path):
     assert result.stderr.strip() == "SSO fixture setup requires this checkout's private lifecycle-owner state"
 
 
+def test_recorded_sso_proof_uses_the_recovery_consumer_schema():
+    # This checks the record interface only; it is not a Native sign-in result.
+    record = {"native_subject": "observed-saml-subject", "connector_id": "fixture-saml-connector",
+              "sso_identity_id": "persistent-name-id", "sso_issuer": "https://idp.example/realms/fixture"}
+    memberships = {"A": ["viewer"], "B": ["editor"]}
+    script = "import sys,json;sys.path.insert(0,'auth-runtime');import ci;print(json.dumps(ci.sso_subject_proof(" + repr(record) + "," + repr(memberships) + ")))"
+    result = subprocess.run([sys.executable, "-B", "-c", script], cwd=ROOT, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"native_subject": "observed-saml-subject", "connector_id": "fixture-saml-connector",
+                                       "identity_id": "persistent-name-id", "issuer": "https://idp.example/realms/fixture",
+                                       "memberships": {"A": ["viewer"], "B": ["editor"]}}
+
+
 def test_cleanup_refuses_a_live_native_recovery_operator(tmp_path):
     runtime = tmp_path / "auth-runtime"
     runtime.mkdir()
