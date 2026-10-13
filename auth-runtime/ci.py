@@ -51,6 +51,7 @@ def validation_plan(suite):
         if selected:
             phases[name] = {**definition, "nodes": selected, "suite": suite}
     return {"suite": suite, "phases": phases, "manual_pending": sorted(manual_nodes),
+            "manual_pending_operations": ["dependency-failure-calibration"],
             "manual_regression_functions": sorted(functions), "manual_checklist": manual["checklist"],
             "acceptance_pending_owners": catalog["pending_owners"], "acceptance_status": "PENDING"}
 
@@ -470,10 +471,14 @@ def publish():
                 public[suite][name] = {"passed": result.get("passed") is True and complete_nodes, "nodes": records}
         passed[suite] = receipt.get("passed") is True and receipt.get("candidate") == sha and bool(plan["phases"]) and set(public[suite]) == set(plan["phases"]) and all(value["passed"] for value in public[suite].values())
     pending_owners = plan["acceptance_pending_owners"]
-    complete = all(passed.values()) and not pending_owners
+    manual_receipt_path = EVIDENCE / "summary-manual-security.json"
+    manual_receipt = json.loads(manual_receipt_path.read_text()) if manual_receipt_path.is_file() else {}
+    manual_operations = [] if (manual_receipt.get("candidate") == sha and manual_receipt.get("dependency_failure_calibration_passed") is True) else ["dependency-failure-calibration"]
+    complete = all(passed.values()) and not pending_owners and not manual_operations
     report = {"candidate": sha, "run_id": summary.get("run_id"), "completed": complete,
               "automated_passed": passed["automated"], "manual_security_passed": passed["manual-security"],
               "manual_pending": sorted(set(plan["manual_pending"]) - manual_passed_nodes),
+              "manual_pending_operations": manual_operations,
               "acceptance_pending_owners": pending_owners, "acceptance_status": "PASSED" if complete else "PENDING", "phases": public}
     serialized = json.dumps(report, ensure_ascii=True, indent=2)
     secret_fields = {"password", "app_secret", "bootstrap_app_secret", "pg_bootstrap", "logto_db", "keycloak_db", "keycloak_admin", "STUDIO_TEST_DATABASE_URL", "STUDIO_TEST_SESSION_KEY",
@@ -538,7 +543,9 @@ def main():
         private_json(EVIDENCE / "versions.json", {"python": platform.python_version(), "host": platform.system(), "architecture": platform.machine(),
                      "packages": {package: version(package) for package in PACKAGES},
                      "images": json.loads((STATE / "images/loaded.json").read_text())})
-        dependency_failures()
+        if args.suite == "manual-security":
+            dependency_failures()
+            receipt["dependency_failure_calibration_passed"] = True
         for name, definition in plan["phases"].items():
             phase(name + ("-manual-security" if args.suite == "manual-security" else ""), definition)
         receipt.update(passed=True, completed_at=datetime.now(timezone.utc).isoformat(), phases=list(plan["phases"]))
