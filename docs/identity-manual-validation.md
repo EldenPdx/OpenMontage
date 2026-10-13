@@ -22,10 +22,10 @@
 | 回调、授权码和已签断言复用 | 并发只有一次成功；重复提交不会新增 Native/BFF 会话或取得资源 |
 | 不同 IdP 的同邮箱身份 | 不继承已有用户的身份、成员权限或资源 |
 | 伪造 cookie/CSRF/Host/origin/proxy/actor/邀请输入 | 返回原要求的拒绝状态，且没有业务变更；包含 UI 故意改写 CSRF 的场景 |
-| 密文、文件路径、符号链接、HTML/SVG | 不接受替换会话，不逃出允许的文件范围，不执行活动脚本；恢复后的错误会话密钥仍被拒绝 |
+| 密文、保护标记、文件路径、符号链接、HTML/SVG | 不接受替换会话或主动损坏的保护标记，不逃出允许的文件范围，不执行活动脚本；恢复后的错误会话密钥仍被拒绝 |
 | 身份、数据库和供应商故障注入 | 真实停服、阻塞读取、Native Management 响应损失、邮件限流、权限模板异常及全局依赖故障校准，保留原有关闭边界和恢复断言 |
 
-精确函数和参数化节点由 [manual-security.json](../auth-runtime/manual-security.json) 与 [required-nodes.json](../auth-runtime/required-nodes.json) 管理。当前总计 430 个必需节点：293 个自动、137 个人工；原有 363 个必需节点全部保留。人工清单还包含独立的 `dependency-failure-calibration` 操作。
+精确函数和参数化节点由 [manual-security.json](../auth-runtime/manual-security.json) 与 [required-nodes.json](../auth-runtime/required-nodes.json) 管理。当前总计 430 个必需节点：292 个自动、138 个人工；原有 363 个必需节点全部保留。人工清单还包含独立的 `dependency-failure-calibration` 操作。
 
 ## 本地操作者入口
 

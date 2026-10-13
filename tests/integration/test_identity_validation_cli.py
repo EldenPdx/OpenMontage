@@ -163,6 +163,8 @@ def test_validation_plan_keeps_real_login_automatic_and_protocol_checks_pending(
     assert "auth-runtime/tests/test_studio_auth28.py::test_long_verified_result_stops_before_remaining_bytes_after_logout[logout]" in automatic
     assert "auth-runtime/tests/test_sso.py::test_standard_enterprise_logout_returns_to_the_application_signed_out[oidc-A]" in automatic
     assert "auth-runtime/tests/test_sso.py::test_enterprise_secrets_stay_private_and_logout_revokes_the_resource_session[oidc-A]" in manual
+    assert "auth-runtime/tests/test_studio_auth28.py::test_owned_worker_refuses_unsafe_protection_before_initializing_project" in manual
+    assert "auth-runtime/tests/test_studio_auth28.py::test_real_pi_ordinary_approval_is_owned_and_captures_current_editor" in automatic
 
 
 def test_restore_plans_use_separate_empty_database_targets():
