@@ -19,7 +19,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && inputs.manual_security && 'manual-security' || 'automated' }}
   cancel-in-progress: true
 
 jobs:

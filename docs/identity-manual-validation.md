@@ -12,6 +12,8 @@
 
 人工套件使用全新的隔离 CI runner，启动固定版本的 Logto、标准 IdP、PostgreSQL、邮件、Pi 和浏览器；它不部署生产。无需把本地凭据填进仓库或工作流输入。
 
+自动与人工套件使用不同的并发组，手工启动不会取消同一候选正在运行的自动验证。人工入口使用 GitHub 的布尔 `inputs` 上下文；参见[工作流输入契约](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onworkflow_dispatchinputs)。
+
 ## 待人工执行的项目
 
 | 项目 | 必须保留的验证 |
