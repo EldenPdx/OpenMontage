@@ -28,6 +28,35 @@ def test_identity_bootstrap_help_documents_explicit_online_permission(tmp_path):
     assert "offline" in result.stdout
 
 
+@pytest.mark.parametrize("global_uv", [False, True], ids=("wheel-scripts-off-path", "independent-path-uv"))
+def test_bootstrap_finds_uv_in_its_python_venv_without_activating_that_venv(tmp_path, global_uv):
+    host = tmp_path / "host"
+    subprocess.run([sys.executable, "-B", "-m", "venv", "--without-pip", str(host)], check=True,
+                   capture_output=True, text=True, timeout=20)
+    python = host / "bin/python"
+    runtime = tmp_path / "application/auth-runtime"
+    runtime.mkdir(parents=True)
+    shutil.copyfile(ROOT / "auth-runtime/bootstrap.py", runtime / "bootstrap.py")
+    recorded = tmp_path / "uv-invocation.json"
+    uv = host / "bin/uv"
+    uv.write_text(f"#!{python}\nimport json,sys\nfrom pathlib import Path\n"
+                  f"Path({str(recorded)!r}).write_text(json.dumps(sys.argv))\nraise SystemExit(57)\n")
+    uv.chmod(0o700)
+    path = tmp_path / "no-global-uv"
+    if global_uv:
+        path.mkdir()
+        installed = path / "uv"
+        shutil.copyfile(uv, installed)
+        installed.chmod(0o700)
+        uv = installed
+    environment = {**os.environ, "PATH": str(path)}
+    result = subprocess.run([str(python), "-B", str(runtime / "bootstrap.py"), "--online", "up"],
+                            cwd=runtime.parent, env=environment, capture_output=True, text=True, timeout=10)
+    assert recorded.is_file(), result.stderr
+    assert json.loads(recorded.read_text()) == [str(uv), "venv", "--python", str(python), "--system-site-packages", str(runtime / ".state/venv")]
+    assert result.returncode != 0 and result.stderr.strip() == "Private identity bootstrap failed; inspect auth-runtime/.state/bootstrap.log"
+
+
 def test_operator_lifecycle_has_explicit_original_vendor_seal_commands():
     result = subprocess.run([sys.executable, "-B", "auth-runtime/manage.py", "--help"], cwd=ROOT,
                             capture_output=True, text=True, timeout=10)
