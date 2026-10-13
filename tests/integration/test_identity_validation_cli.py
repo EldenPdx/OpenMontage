@@ -115,12 +115,166 @@ def test_validation_cli_names_a_missing_library_and_never_exposes_its_exception(
     assert "Traceback" not in result.stderr
 
 
+def test_validation_plan_keeps_real_login_automatic_and_protocol_checks_pending():
+    result = subprocess.run([sys.executable, "-B", "auth-runtime/ci.py", "plan"], cwd=ROOT,
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    plan = json.loads(result.stdout)
+    automatic = {node for definition in plan["phases"].values() for node in definition["nodes"]}
+    manual = set(plan["manual_pending"])
+    assert "auth-runtime/tests/test_environment.py::test_real_signed_saml_sso_returns_a_verified_logto_identity" in automatic
+    assert "auth-runtime/tests/test_bff_oidc_faults.py::test_nonfinite_id_token_date_is_rejected_as_unverified_identity" in manual
+    assert automatic.isdisjoint(manual)
+    catalog = json.loads((ROOT / "auth-runtime/required-nodes.json").read_text())
+    assert automatic | manual == {node for definition in catalog["phases"].values() for node in definition["nodes"]}
+    assert plan["suite"] == "automated" and plan["acceptance_status"] == "PENDING"
+
+
+def test_restore_plans_use_separate_empty_database_targets():
+    plans = {}
+    for suite in ("automated", "manual-security"):
+        result = subprocess.run([sys.executable, "-B", "auth-runtime/ci.py", "plan", "--suite", suite],
+                                cwd=ROOT, capture_output=True, text=True, timeout=10)
+        assert result.returncode == 0, result.stderr
+        plans[suite] = json.loads(result.stdout)
+    native = plans["automated"]["phases"]["coordinated-native-restore"]["database_config"]
+    business = plans["manual-security"]["phases"]["authenticated-restore"]["database_config"]
+    assert native == "ci-native-runtime-roles.json" and business == "ci-runtime-roles.json"
+
+
+def test_default_regression_deselects_manual_checks_and_reports_pending(tmp_path):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    shutil.copyfile(ROOT / "tests/conftest.py", tests / "conftest.py")
+    runtime = tmp_path / "auth-runtime"
+    runtime.mkdir()
+    (runtime / "manual-security.json").write_text(json.dumps({"functions": ["tests/test_entry.py::test_operator_check"]}))
+    (tests / "test_entry.py").write_text("def test_ordinary():\n    pass\ndef test_operator_check():\n    assert False, 'manual selection witness'\n")
+    environment = {**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"}
+    environment.pop("PYTEST_ADDOPTS", None)
+    result = subprocess.run([sys.executable, "-B", "-m", "pytest", "-p", "no:cacheprovider", "-q", "tests/"],
+                            cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "1 passed, 1 deselected" in result.stdout and "manual security PENDING: 1" in result.stdout
+    opted = subprocess.run([sys.executable, "-B", "-m", "pytest", "-p", "no:cacheprovider", "-q", "--include-manual-security", "tests/"],
+                           cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=10)
+    assert opted.returncode != 0 and "manual selection witness" in opted.stdout
+
+
+def test_required_phase_runs_only_the_exact_reviewed_nodes(tmp_path):
+    runtime = tmp_path / "auth-runtime"
+    runtime.mkdir()
+    for name in ("ci.py", "required.py"):
+        shutil.copyfile(ROOT / "auth-runtime" / name, runtime / name)
+    (tmp_path / "requirements-auth.txt").write_text("logto==0.2.1\n")
+    (tmp_path / "test_entry.py").write_text("def test_reviewed():\n    pass\ndef test_unselected():\n    assert False, 'unselected witness'\n")
+    definition = {"runtime": False, "timeout_seconds": 10, "nodes": ["test_entry.py::test_reviewed"]}
+    script = "import sys;sys.path.insert(0,'auth-runtime');import ci;ci.phase('tracer'," + repr(definition) + ")"
+    environment = {**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"}
+    environment.pop("PYTEST_ADDOPTS", None)
+    result = subprocess.run([sys.executable, "-B", "-c", script], cwd=tmp_path, env=environment,
+                            capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+    report = json.loads((runtime / ".state/validation/tracer-result.json").read_text())
+    assert report["passed"] is True and set(report["nodes"]) == {"test_entry.py::test_reviewed"}
+
+
+@pytest.mark.parametrize("operator_exit", [0, 7], ids=("operator-restored", "operator-failed"))
+def test_coordinated_phase_requires_its_recovery_operator_to_succeed(tmp_path, operator_exit):
+    runtime = tmp_path / "auth-runtime"
+    runtime.mkdir()
+    for name in ("ci.py", "required.py"):
+        shutil.copyfile(ROOT / "auth-runtime" / name, runtime / name)
+    (tmp_path / "requirements-auth.txt").write_text("logto==0.2.1\n")
+    (runtime / "native_recovery.py").write_text(
+        "import sys\nfrom pathlib import Path\n"
+        "if sys.argv[1]=='prepare':\n"
+        "    directory=Path(sys.argv[sys.argv.index('--control')+1]);directory.mkdir(mode=0o700)\n"
+        "    (directory/'plan.json').write_text('{}')\n"
+        f"else:\n    raise SystemExit({operator_exit})\n")
+    (tmp_path / "test_entry.py").write_text("import os\nfrom pathlib import Path\ndef test_reviewed():\n    assert Path(os.environ['AUTH32_NATIVE_RECOVERY_PLAN']).is_file()\n")
+    definition = {"runtime": False, "timeout_seconds": 10, "coordinated_restore": True, "nodes": ["test_entry.py::test_reviewed"]}
+    script = "import sys;sys.path.insert(0,'auth-runtime');import ci;ci.phase('tracer'," + repr(definition) + ")"
+    environment = {**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"}
+    environment.pop("PYTEST_ADDOPTS", None)
+    result = subprocess.run([sys.executable, "-B", "-c", script], cwd=tmp_path, env=environment,
+                            capture_output=True, text=True, timeout=15)
+    assert (result.returncode == 0) == (operator_exit == 0), result.stderr
+    report = json.loads((runtime / ".state/validation/tracer-result.json").read_text())
+    assert report["passed"] is True
+
+
+def test_sso_fixture_setup_requires_the_private_lifecycle_owner(tmp_path):
+    runtime = tmp_path / "auth-runtime"
+    runtime.mkdir()
+    for name in ("ci.py", "manage.py"):
+        shutil.copyfile(ROOT / "auth-runtime" / name, runtime / name)
+    (tmp_path / "requirements-auth.txt").write_text("logto==0.2.1\n")
+    result = subprocess.run([sys.executable, "-B", str(runtime / "ci.py"), "prepare-sso"], cwd=tmp_path,
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode != 0
+    assert result.stderr.strip() == "SSO fixture setup requires this checkout's private lifecycle-owner state"
+
+
+def test_cleanup_refuses_a_live_native_recovery_operator(tmp_path):
+    runtime = tmp_path / "auth-runtime"
+    runtime.mkdir()
+    shutil.copyfile(ROOT / "auth-runtime/ci.py", runtime / "ci.py")
+    (tmp_path / "requirements-auth.txt").write_text("logto==0.2.1\n")
+    (runtime / "native_recovery.py").write_text("import time\ntime.sleep(30)\n")
+    evidence = runtime / ".state/validation"
+    evidence.mkdir(parents=True)
+    plan = evidence / "plan.json"
+    operator = subprocess.Popen([sys.executable, "-B", "auth-runtime/native_recovery.py", "serve", "--plan", str(plan)], cwd=tmp_path)
+    try:
+        (evidence / "active-native-recovery.json").write_text(json.dumps({"pid": operator.pid, "plan": str(plan)}))
+        result = subprocess.run([sys.executable, "-B", str(runtime / "ci.py"), "cleanup"], cwd=tmp_path,
+                                capture_output=True, text=True, timeout=10)
+        assert result.returncode != 0
+        assert result.stderr.strip() == "Native recovery operator is still active; verify original recovery before cleanup"
+    finally:
+        operator.terminate()
+        operator.wait(timeout=5)
+
+
+def test_published_automatic_success_does_not_claim_manual_acceptance(tmp_path):
+    runtime = tmp_path / "auth-runtime"
+    runtime.mkdir()
+    shutil.copyfile(ROOT / "auth-runtime/ci.py", runtime / "ci.py")
+    (tmp_path / "requirements-auth.txt").write_text("logto==0.2.1\n")
+    manual_node = "test_protocol.py::test_operator_check"
+    automatic_node = "test_login.py::test_ordinary_login"
+    catalog = {"pending_owners": [30, 32], "phases": {"login": {"nodes": [automatic_node, manual_node]}}}
+    (runtime / "required-nodes.json").write_text(json.dumps(catalog))
+    (runtime / "manual-security.json").write_text(json.dumps({"functions": [manual_node], "checklist": ["Human protocol acceptance"]}))
+    for arguments in (["init", "-q"], ["config", "user.name", "Identity CLI Test"], ["config", "user.email", "identity-cli@openmontage.test"],
+                      ["add", "."], ["commit", "-qm", "Fixture for published outcomes"]):
+        subprocess.run(["git", *arguments], cwd=tmp_path, check=True, capture_output=True)
+    sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=tmp_path, text=True).strip()
+    evidence = runtime / ".state/validation"
+    evidence.mkdir(parents=True)
+    summary = {"candidate": sha, "passed": True, "run_id": "automatic-run", "suite": "automated"}
+    for name in ("summary", "summary-automated"):
+        (evidence / (name + ".json")).write_text(json.dumps(summary))
+    phases = {stage: [{"outcome": "passed", "xfail": False}] for stage in ("setup", "call", "teardown")}
+    (evidence / "login-result.json").write_text(json.dumps({"passed": True, "run_id": "automatic-run", "nodes": {automatic_node: phases}}))
+    result = subprocess.run([sys.executable, "-B", str(runtime / "ci.py"), "publish"], cwd=tmp_path,
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    report = json.loads((evidence / "public/outcomes.json").read_text())
+    assert report["automated_passed"] is True and report["completed"] is False
+    assert report["manual_pending"] == [manual_node]
+    assert report["acceptance_status"] == "PENDING" and report["acceptance_pending_owners"] == [30, 32]
+
+
 def test_a_failed_new_run_cannot_publish_a_previous_success_receipt(tmp_path):
     runtime = tmp_path / "auth-runtime"
     runtime.mkdir()
     shutil.copyfile(ROOT / "auth-runtime/ci.py", runtime / "ci.py")
     (tmp_path / "requirements-auth.txt").write_text("logto==0.2.1\n")
-    (runtime / "required-nodes.json").write_text(json.dumps({"pending_owners": [32], "phases": {}}))
+    node = "test_input.py::test_manual"
+    (runtime / "required-nodes.json").write_text(json.dumps({"pending_owners": [32], "phases": {"manual": {"nodes": [node]}}}))
+    (runtime / "manual-security.json").write_text(json.dumps({"functions": [node], "checklist": ["Human acceptance"]}))
     for arguments in (["init", "-q"], ["config", "user.name", "Identity CLI Test"], ["config", "user.email", "identity-cli@openmontage.test"],
                       ["add", "."], ["commit", "-qm", "Fixture for CLI safety"]):
         subprocess.run(["git", *arguments], cwd=tmp_path, check=True, capture_output=True)

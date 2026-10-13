@@ -2,6 +2,12 @@ name: CI
 
 on:
   workflow_dispatch:
+    inputs:
+      manual_security:
+        description: Run the human-operated security acceptance suite
+        type: boolean
+        required: false
+        default: false
   pull_request:
     branches:
       - main
@@ -108,6 +114,7 @@ jobs:
       STUDIO_REQUIRE_INTEGRATION: "1"
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHON_DOTENV_DISABLED: "1"
+      AUTH32_VALIDATION_SUITE: ${{ github.event_name == 'workflow_dispatch' && inputs.manual_security && 'manual-security' || 'automated' }}
 
     steps:
       - name: Checkout repository
@@ -153,11 +160,11 @@ jobs:
           umask 077
           .venv/bin/python -B auth-runtime/bootstrap.py --online up
 
-      - name: Run every required real identity phase
+      - name: Run the explicitly selected real identity suite
         timeout-minutes: 65
         env:
           STUDIO_TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
-        run: .venv/bin/python -B auth-runtime/ci.py run --candidate "$GITHUB_SHA"
+        run: .venv/bin/python -B auth-runtime/ci.py run --suite "$AUTH32_VALIDATION_SUITE" --candidate "$GITHUB_SHA"
 
       - name: Stop only this checkout's identity services
         if: ${{ always() }}

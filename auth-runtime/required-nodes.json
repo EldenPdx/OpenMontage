@@ -209,7 +209,17 @@
         "tests/integration/test_identity_recovery_control.py::test_fresh_private_fixed_recovery_plan_can_be_read_without_any_native_dependency",
         "tests/integration/test_identity_recovery_control.py::test_native_inventory_cannot_observe_an_unapproved_database_or_container[foreign-database]",
         "tests/integration/test_identity_recovery_control.py::test_native_inventory_cannot_observe_an_unapproved_database_or_container[aliased-container]",
-        "tests/integration/test_identity_recovery_control.py::test_native_inventory_cannot_observe_an_unapproved_database_or_container[option-container]"
+        "tests/integration/test_identity_recovery_control.py::test_native_inventory_cannot_observe_an_unapproved_database_or_container[option-container]",
+        "tests/integration/test_identity_validation_cli.py::test_validation_plan_keeps_real_login_automatic_and_protocol_checks_pending",
+        "tests/integration/test_identity_validation_cli.py::test_restore_plans_use_separate_empty_database_targets",
+        "tests/integration/test_identity_validation_cli.py::test_default_regression_deselects_manual_checks_and_reports_pending",
+        "tests/integration/test_identity_validation_cli.py::test_required_phase_runs_only_the_exact_reviewed_nodes",
+        "tests/integration/test_identity_validation_cli.py::test_published_automatic_success_does_not_claim_manual_acceptance",
+        "tests/integration/test_identity_validation_cli.py::test_sso_fixture_setup_requires_the_private_lifecycle_owner",
+        "tests/integration/test_identity_validation_cli.py::test_cleanup_refuses_a_live_native_recovery_operator",
+        "tests/integration/test_identity_validation_cli.py::test_coordinated_phase_requires_its_recovery_operator_to_succeed[operator-restored]",
+        "tests/integration/test_identity_validation_cli.py::test_coordinated_phase_requires_its_recovery_operator_to_succeed[operator-failed]",
+        "tests/integration/test_identity_recovery_control.py::test_native_recovery_operator_prepares_a_fresh_private_plan_without_services"
       ]
     },
     "bff": {
@@ -444,6 +454,65 @@
       "timeout_seconds": 600,
       "nodes": [
         "auth-runtime/tests/test_authenticated_restore.py::test_operator_restore_keeps_original_cookie_key_media_and_runtime_roles_without_changing_source"
+      ],
+      "database_config": "ci-runtime-roles.json"
+    },
+    "sso": {
+      "namespace": "auth30",
+      "origin": "http://127.0.0.1:4765",
+      "runtime": true,
+      "timeout_seconds": 900,
+      "nodes": [
+        "auth-runtime/tests/test_sso.py::test_enterprise_callback_replay_cannot_create_another_bff_session[oidc-A]",
+        "auth-runtime/tests/test_sso.py::test_enterprise_callback_replay_cannot_create_another_bff_session[saml-B]",
+        "auth-runtime/tests/test_sso.py::test_enterprise_secrets_stay_private_and_logout_revokes_the_resource_session[oidc-A]",
+        "auth-runtime/tests/test_sso.py::test_enterprise_secrets_stay_private_and_logout_revokes_the_resource_session[saml-B]",
+        "auth-runtime/tests/test_sso.py::test_standard_oidc_sso_creates_a_persistent_personal_identity_and_owned_resource",
+        "auth-runtime/tests/test_sso.py::test_standard_oidc_sso_selects_only_its_explicit_editor_membership",
+        "auth-runtime/tests/test_sso.py::test_standard_signed_saml_sso_creates_its_own_persistent_personal_identity",
+        "auth-runtime/tests/test_sso.py::test_standard_signed_saml_sso_keeps_explicit_a_viewer_and_b_editor_separate",
+        "auth-runtime/tests/test_sso.py::test_valid_oidc_identity_cannot_select_a_foreign_organization_hint",
+        "auth-runtime/tests/test_sso.py::test_same_email_distinct_oidc_identity_cannot_link_an_existing_account",
+        "auth-runtime/tests/test_sso.py::test_signed_saml_assertion_has_one_native_concurrent_winner_and_rejects_replay"
+      ]
+    },
+    "ui": {
+      "namespace": "auth31",
+      "origin": "http://127.0.0.1:4764",
+      "runtime": true,
+      "timeout_seconds": 900,
+      "nodes": [
+        "auth-runtime/tests/test_ui_accounts.py::test_signed_in_account_identifies_the_current_user_and_personal_space",
+        "auth-runtime/tests/test_ui_accounts.py::test_keyboard_signout_revokes_the_account_and_shows_safe_login_links",
+        "auth-runtime/tests/test_ui_accounts.py::test_lost_personal_task_response_keeps_the_same_context_and_key_after_reload",
+        "auth-runtime/tests/test_ui_accounts.py::test_real_permission_403_never_retries_the_write_and_updates_viewer_controls",
+        "auth-runtime/tests/test_ui_accounts.py::test_real_csrf_rejection_refreshes_only_the_same_identity_space_and_key",
+        "auth-runtime/tests/test_ui_accounts.py::test_a_lost_task_event_connection_reconnects_with_the_verified_current_space",
+        "auth-runtime/tests/test_ui_accounts.py::test_a_slow_old_workspace_read_cannot_restore_private_tasks_or_drafts",
+        "auth-runtime/tests/test_ui_accounts.py::test_account_controls_have_keyboard_labels_localized_errors_and_mobile_layout[zh-\\u5de5\\u4f5c\\u7a7a\\u95f4-\\u7ba1\\u7406\\u4f01\\u4e1a-\\u53d1\\u9001\\u9080\\u8bf7-\\u8bf7\\u8f93\\u5165\\u6709\\u6548\\u7684\\u90ae\\u7bb1\\u5730\\u5740\\u3002]",
+        "auth-runtime/tests/test_ui_accounts.py::test_account_controls_have_keyboard_labels_localized_errors_and_mobile_layout[ja-\\u30ef\\u30fc\\u30af\\u30b9\\u30da\\u30fc\\u30b9-\\u7d44\\u7e54\\u3092\\u7ba1\\u7406-\\u62db\\u5f85\\u3092\\u9001\\u4fe1-\\u6709\\u52b9\\u306a\\u30e1\\u30fc\\u30eb\\u30a2\\u30c9\\u30ec\\u30b9\\u3092\\u5165\\u529b\\u3057\\u3066\\u304f\\u3060\\u3055\\u3044\\u3002]",
+        "auth-runtime/tests/test_ui_accounts.py::test_account_controls_have_keyboard_labels_localized_errors_and_mobile_layout[en-Workspace-Manage organization-Send invitation-Enter a valid email address.]",
+        "auth-runtime/tests/test_ui_accounts.py::test_real_invitation_is_memory_only_and_login_accept_role_change_remove_use_the_ui",
+        "auth-runtime/tests/test_ui_accounts.py::test_user_creates_an_organization_cancels_its_invitation_and_cannot_remove_its_last_admin",
+        "auth-runtime/tests/test_ui_accounts.py::test_multitab_space_logout_and_new_account_do_not_transfer_pending_tasks_cursors_or_old_urls",
+        "auth-runtime/tests/test_ui_accounts.py::test_a_member_without_recognized_roles_is_not_displayed_as_a_viewer",
+        "auth-runtime/tests/test_ui_accounts.py::test_active_account_can_revoke_its_session_when_identity_reads_are_unavailable",
+        "auth-runtime/tests/test_ui_accounts.py::test_back_navigation_preserves_only_an_unconfirmed_write_in_the_same_context",
+        "auth-runtime/tests/test_ui_accounts.py::test_focus_without_broadcast_restores_current_workspace_and_studio",
+        "auth-runtime/tests/test_ui_accounts.py::test_authority_recovery_focus_restores_studio_in_the_verified_context",
+        "auth-runtime/tests/test_ui_accounts.py::test_same_context_role_refresh_updates_the_account_without_clearing_drafts"
+      ]
+    },
+    "manual-regression": {
+      "runtime": false,
+      "timeout_seconds": 600,
+      "nodes": [
+        "tests/backlot/test_server.py::TestBacklotServerApi::test_project_symlink_cannot_serve_files_outside_projects",
+        "tests/backlot/test_server.py::TestBacklotServerApi::test_media_rejects_path_traversal",
+        "tests/backlot/test_state.py::TestFindingsFixes::test_artifact_refs_outside_project_are_not_followed",
+        "tests/contracts/test_studio_tool_bridge.py::test_controlled_paths_reject_escape_secrets_and_checkpoint_writes",
+        "tests/integration/test_studio_api.py::test_cross_site_rebinding_csrf_and_secret_input_are_rejected_without_echo",
+        "tests/integration/test_studio_policy.py::test_atomic_artifact_and_gate_stop_model_calls_and_reject_forged_approval"
       ]
     },
     "coordinated-native-restore": {
@@ -453,8 +522,10 @@
       "timeout_seconds": 1200,
       "coordinated_restore": true,
       "nodes": [
-        "auth-runtime/tests/test_native_identity_restore.py::test_coordinated_native_and_business_restore_preserves_oidc_saml_principals_old_cookie_keys_and_media"
-      ]
+        "auth-runtime/tests/test_native_identity_restore.py::test_coordinated_native_and_business_restore_preserves_oidc_saml_principals_old_cookie_keys_and_media",
+        "auth-runtime/tests/test_native_identity_restore.py::test_coordinated_native_restore_rejects_a_wrong_session_key"
+      ],
+      "database_config": "ci-native-runtime-roles.json"
     }
   }
 }

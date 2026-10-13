@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import os
 import socket
+import json
+from pathlib import Path
 
 import pytest
 
@@ -115,6 +117,11 @@ def _block_network():
         socket.create_connection = _real_create_connection
 
 
+def pytest_addoption(parser):
+    parser.addoption("--include-manual-security", action="store_true",
+                     help="Human-operated run including the explicit manual security manifest")
+
+
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",
@@ -124,7 +131,21 @@ def pytest_configure(config):
 
 
 def pytest_collection_modifyitems(config, items):
-    """Skip live_api tests unless the operator explicitly opted in."""
+    """Keep manual security acceptance visible without running it by default."""
+    try:
+        path = Path(__file__).resolve().parents[1] / "auth-runtime/manual-security.json"
+        functions = json.loads(path.read_text())["functions"]
+        if not functions or len(set(functions)) != len(functions) or any("::" not in name for name in functions):
+            raise ValueError
+    except (OSError, ValueError, KeyError, TypeError):
+        raise pytest.UsageError("Explicit manual security manifest is missing or invalid") from None
+    if not config.getoption("include_manual_security"):
+        pending = [item for item in items if
+                   item.path.relative_to(path.parents[1]).as_posix() + "::" + item.nodeid.split("::", 1)[1].split("[", 1)[0] in functions]
+        if pending:
+            config._manual_security_pending = len(pending)
+            config.hook.pytest_deselected(items=pending)
+            items[:] = [item for item in items if item not in pending]
     if _network_allowed():
         return
     skip = pytest.mark.skip(
@@ -133,3 +154,9 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if "live_api" in item.keywords:
             item.add_marker(skip)
+
+
+def pytest_terminal_summary(terminalreporter):
+    pending = getattr(terminalreporter.config, "_manual_security_pending", 0)
+    if pending:
+        terminalreporter.write_line(f"manual security PENDING: {pending} nodes deselected; human acceptance required")
