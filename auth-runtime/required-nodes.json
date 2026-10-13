@@ -219,7 +219,8 @@
         "tests/integration/test_identity_validation_cli.py::test_cleanup_refuses_a_live_native_recovery_operator",
         "tests/integration/test_identity_validation_cli.py::test_coordinated_phase_requires_its_recovery_operator_to_succeed[operator-restored]",
         "tests/integration/test_identity_validation_cli.py::test_coordinated_phase_requires_its_recovery_operator_to_succeed[operator-failed]",
-        "tests/integration/test_identity_recovery_control.py::test_native_recovery_operator_prepares_a_fresh_private_plan_without_services"
+        "tests/integration/test_identity_recovery_control.py::test_native_recovery_operator_prepares_a_fresh_private_plan_without_services",
+        "tests/integration/test_identity_validation_cli.py::test_external_review_can_collect_ordinary_tests_with_the_project_plugin"
       ]
     },
     "bff": {
@@ -473,7 +474,16 @@
         "auth-runtime/tests/test_sso.py::test_standard_signed_saml_sso_keeps_explicit_a_viewer_and_b_editor_separate",
         "auth-runtime/tests/test_sso.py::test_valid_oidc_identity_cannot_select_a_foreign_organization_hint",
         "auth-runtime/tests/test_sso.py::test_same_email_distinct_oidc_identity_cannot_link_an_existing_account",
-        "auth-runtime/tests/test_sso.py::test_signed_saml_assertion_has_one_native_concurrent_winner_and_rejects_replay"
+        "auth-runtime/tests/test_sso.py::test_signed_saml_assertion_has_one_native_concurrent_winner_and_rejects_replay",
+        "auth-runtime/tests/test_sso_claims.py::test_trusted_signed_saml_wrong_audience_is_rejected_before_native_continuation",
+        "auth-runtime/tests/test_sso_claims.py::test_trusted_signed_saml_fixed_claims_are_rejected_before_native_continuation[wrong_assertion_issuer]",
+        "auth-runtime/tests/test_sso_claims.py::test_trusted_signed_saml_fixed_claims_are_rejected_before_native_continuation[conditions_expired]",
+        "auth-runtime/tests/test_sso_claims.py::test_trusted_signed_saml_fixed_claims_are_rejected_before_native_continuation[bearer_expired]",
+        "auth-runtime/tests/test_sso_claims.py::test_trusted_signed_saml_fixed_claims_are_rejected_before_native_continuation[wrong_recipient]",
+        "auth-runtime/tests/test_sso_claims.py::test_trusted_signed_saml_fixed_claims_are_rejected_before_native_continuation[wrong_bearer_in_response_to]",
+        "auth-runtime/tests/test_sso_claims.py::test_trusted_signed_saml_fixed_claims_are_rejected_before_native_continuation[wrong_response_in_response_to]",
+        "auth-runtime/tests/test_sso_claims.py::test_trusted_signed_saml_fixed_claims_are_rejected_before_native_continuation[wrong_destination]",
+        "auth-runtime/tests/test_sso_claims.py::test_saml_corrupt_outer_response_signature_is_rejected_before_native_continuation"
       ]
     },
     "ui": {

@@ -6,7 +6,8 @@
     "Authorization-code, callback and signed-assertion replay, including concurrent consumption",
     "Same-email identities from separate identity providers",
     "Forged cookies, CSRF, host/origin/proxy headers, actor fields and invitation tickets",
-    "Ciphertext substitution, path/symlink escape and active HTML/SVG inputs"
+    "Ciphertext substitution, path/symlink escape and active HTML/SVG inputs",
+    "Owner-controlled dependency/service outages, mail throttling, response-loss and authority fault injection"
   ],
   "functions": [
     "auth-runtime/tests/test_bff_oidc_faults.py::test_nonfinite_id_token_date_is_rejected_as_unverified_identity",
@@ -46,6 +47,28 @@
     "tests/contracts/test_studio_tool_bridge.py::test_controlled_paths_reject_escape_secrets_and_checkpoint_writes",
     "tests/backlot/test_server.py::TestBacklotServerApi::test_project_symlink_cannot_serve_files_outside_projects",
     "tests/backlot/test_server.py::TestBacklotServerApi::test_media_rejects_path_traversal",
-    "tests/backlot/test_state.py::TestFindingsFixes::test_artifact_refs_outside_project_are_not_followed"
+    "tests/backlot/test_state.py::TestFindingsFixes::test_artifact_refs_outside_project_are_not_followed",
+    "auth-runtime/tests/test_bff.py::test_real_logto_outage_fails_closed_but_logout_still_revokes_locally",
+    "auth-runtime/tests/test_bff.py::test_real_database_unavailability_cannot_report_logout_success_or_anonymous_access",
+    "auth-runtime/tests/test_backlot_outage.py::test_real_service_outage_terminates_protected_stream",
+    "auth-runtime/tests/test_studio_auth28.py::test_authority_http_outage_closes_idle_sse_and_rejects_replay_without_business_effects",
+    "auth-runtime/tests/test_studio_auth28.py::test_idle_sse_ends_when_its_real_pg_resource_read_is_blocked",
+    "auth-runtime/tests/test_ui_accounts.py::test_real_csrf_rejection_refreshes_only_the_same_identity_space_and_key",
+    "auth-runtime/tests/test_sso_claims.py::test_trusted_signed_saml_wrong_audience_is_rejected_before_native_continuation",
+    "auth-runtime/tests/test_sso_claims.py::test_trusted_signed_saml_fixed_claims_are_rejected_before_native_continuation",
+    "auth-runtime/tests/test_sso_claims.py::test_saml_corrupt_outer_response_signature_is_rejected_before_native_continuation",
+    "auth-runtime/tests/test_organizations_recovery.py::test_invitation_response_loss_restarts_without_another_email_or_invitation",
+    "auth-runtime/tests/test_organizations_recovery.py::test_organization_creation_recovers_each_native_stage_without_repeating_it",
+    "auth-runtime/tests/test_organizations_recovery.py::test_remaining_admin_reconciles_an_unknown_self_removal_without_granting_as_old_actor",
+    "auth-runtime/tests/test_organizations_recovery.py::test_permission_loss_before_submission_releases_the_organization_intent",
+    "auth-runtime/tests/test_organizations_recovery.py::test_real_native_mail_throttle_can_recover_after_restart_without_an_extra_invitation",
+    "auth-runtime/tests/test_organizations_recovery.py::test_member_response_loss_reconciles_after_restart_and_revokes_immediately",
+    "auth-runtime/tests/test_organizations_recovery.py::test_other_429_retains_unknown_outcome_without_another_native_post",
+    "auth-runtime/tests/test_organizations_recovery.py::test_invitation_terminal_response_loss_reconciles_once_after_restart",
+    "auth-runtime/tests/test_organizations_recovery.py::test_management_read_outage_restarts_and_completes_one_real_invitation",
+    "auth-runtime/tests/test_organizations_recovery.py::test_changed_role_template_cannot_create_and_recovers_after_fixed_authority"
+  ],
+  "nodes": [
+    "auth-runtime/tests/test_studio_auth28.py::test_long_verified_result_stops_before_remaining_bytes_after_logout[outage]"
   ]
 }
