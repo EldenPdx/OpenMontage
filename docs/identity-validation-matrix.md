@@ -1,10 +1,56 @@
 # AUTH-10 / #32 identity validation matrix
 
-**IMPLEMENTATION IN PROGRESS — refreshed 2026-10-13. Every final #32 scenario below remains PENDING.** The reviewed node catalog, required-result guard, explicit cold-online bootstrap and mandatory identity CI are being implemented. Their CLI checks are not final real identity/SSO/migration/media acceptance. Formal #32 acceptance still requires #24–31 closure, real integrated runs and independent review.
+**FINAL ACCEPTANCE PENDING — refreshed 2026-10-13.** The executable catalog, required-result guard, explicit cold bootstrap and two verification suites are implemented. Their CLI checks are not final real identity/SSO/migration/media acceptance. Formal #32 acceptance still requires real integrated observations, independent review, exact-main CI and the user-operated security checklist below.
 
 Authority: [#32](https://github.com/EldenPdx/OpenMontage/issues/32), [#22](https://github.com/EldenPdx/OpenMontage/issues/22), and [#23](https://github.com/EldenPdx/OpenMontage/issues/23), [#24](https://github.com/EldenPdx/OpenMontage/issues/24), [#25](https://github.com/EldenPdx/OpenMontage/issues/25), [#26](https://github.com/EldenPdx/OpenMontage/issues/26), [#27](https://github.com/EldenPdx/OpenMontage/issues/27), [#28](https://github.com/EldenPdx/OpenMontage/issues/28), [#29](https://github.com/EldenPdx/OpenMontage/issues/29), [#30](https://github.com/EldenPdx/OpenMontage/issues/30), [#31](https://github.com/EldenPdx/OpenMontage/issues/31). Read with [identity contracts](identity-contracts.md), [identity ADR](adr/0001-personal-organization-identity.md), [browser-production ADR](adr/browser-production.md), [production contracts](browser-production-contracts.md), and [GLOSSARY](../GLOSSARY.md). This matrix applies those contracts; interface changes return to the contract/module owner.
 
 Implementation owner: the assigned #32 agent. Checkout: `/Users/eldenpdx/.codex/worktrees/auth-32-validation/OpenMontage`; branch: `codex/auth-32-validation`; original preparation commit: `30585082da16d1605048119086128610788c389a`; current integrated foundation: `1e7001fea67a0da5c1d3640446828887bd37597b`. Root has assigned this owner the necessary bootstrap/images/manage/CI edits exclusively, plus dedicated acceptance tests, outcome accounting and runbooks. Parent owns integration, GitHub evidence and manual closure. Original dirty source is outside this change. Shared Serena remains on the other project; no CodeGraph index is created here.
+
+## Automatic verification and manual security acceptance
+
+The user's 2026-10-13 instruction assigns tests involving protocol manipulation, replay, identity collisions, crafted security inputs and authority/DB/provider failure injection to the user. All existing assertions and acceptance requirements remain. `auth-runtime/required-nodes.json` holds the complete required catalog; `auth-runtime/manual-security.json` classifies exact test functions and individual parameter variants. No keyword matching is used. The current catalog contains 420 required nodes: 285 automatic and 135 manual. The original 363 nodes are all retained. The directly actionable Chinese operator checklist is [manual identity validation](identity-manual-validation.md).
+
+Normal `make test` and pytest runs deselect the explicitly classified manual cases and print `manual security PENDING`; they do not mark those cases skipped or passed. `ci.py run` defaults to `automated`, selects exact node IDs, and requires every selected setup/call/teardown to pass. Real Logto/PG/IdP/Pi/Chromium/FFmpeg health checks remain mandatory. Standard OIDC/SAML login, explicit member roles, ordinary resource/CRUD/approval/media flows, migrations and the positive coordinated Native restore remain automatic. Ordinary browser disconnects, lost responses to authorized client requests and retry/reconnection in the same verified context remain automatic. Missing dependencies fail that suite.
+
+Inspect either selection without contacting services or executing tests:
+
+```sh
+.venv/bin/python -B auth-runtime/ci.py plan
+.venv/bin/python -B auth-runtime/ci.py plan --suite manual-security
+```
+
+The dedicated fresh CI runner is the sole lifecycle owner. After its explicit online bootstrap, automatic execution is:
+
+```sh
+.venv/bin/python -B auth-runtime/ci.py run --candidate "$(git rev-parse HEAD)"
+.venv/bin/python -B auth-runtime/ci.py publish
+```
+
+These commands require the complete CI environment and clean exact candidate. On a cold runner, `prepare-sso` performs genuine personal OIDC and signed SAML browser logins before recording actual native identity bindings. It then grants OIDC A/editor and SAML A/viewer+B/editor and verifies fresh BFF member-role and owned-resource behavior. The SSO phase precedes Native recovery. No subject or membership is inferred from email. The business-only and Native recovery targets are separate empty databases; earlier archives and restored targets are retained.
+
+The user performs the following **PENDING** checks through the explicit manual suite on a fresh disposable runner:
+
+| Manual acceptance group | Required observations |
+| --- | --- |
+| Signed OIDC/SAML claims and signature | Otherwise accepting controls, claim/issuer/audience/nonce/request/recipient/expiry binding, actual upstream rejection and no partial authenticated session |
+| Callback/code/assertion replay | One concurrent winner and no additional Native/BFF session after reuse |
+| Same-email identity collision | Separate immutable IdP identities never acquire the existing user's identity, grants or owned resources |
+| Crafted cookies/CSRF/origin/Host/proxy/actor/invitation input | Original rejection status and no unauthorized business effect; deliberate UI CSRF input is included |
+| Ciphertext, paths, symlinks and active HTML/SVG | No substituted private session, escaping bytes or script execution; wrong-key restore retains its complete denial checks |
+| Dependency and authority faults | Explicit dependency-failure calibration, real service pauses, blocked reads, Native Management response losses, mail throttling and altered role templates retain their original failure/recovery assertions |
+
+Manual execution is never automatically dispatched by the agent or by PR/push CI. In GitHub's **CI → Run workflow**, the user selects the exact candidate ref and explicitly enables `manual_security`. Its default is false; PR/push events always select `automated`. An operator can instead run the following in an exclusively owned disposable environment:
+
+```sh
+.venv/bin/python -B auth-runtime/ci.py run --suite manual-security --candidate "$(git rev-parse HEAD)"
+.venv/bin/python -B auth-runtime/ci.py publish
+```
+
+The manual runner explicitly includes classified tests; it has the same no-skip/no-xfail required-result guard. The global dependency fault calibration runs only in this suite and is separately reported as `manual_pending_operations: ["dependency-failure-calibration"]` until its exact-candidate receipt exists. A completed backup/restore is required; an absent helper or a failed original-service recovery cannot become a skip. The parent waits up to 600 seconds for helper recovery and refuses cleanup while the recorded operator process is still active.
+
+Sanitized `public/outcomes.json` distinguishes `automated_passed`, `manual_security_passed`, `manual_pending`, `manual_pending_operations`, `acceptance_pending_owners` and `acceptance_status`. `completed` means both suites and operation evidence passed on the exact candidate and owner signoffs are recorded. Automatic green CI alone leaves full acceptance **PENDING**. Separate CI artifacts must be matched by exact candidate SHA in the final review. #30/#32/#22 remain open until the required human results and independent signoffs are published; `pending_owners` is the acceptance ledger, not permission to omit automatic verification.
+
+The historical worksheet below remains for scenario coverage. Its earlier preparation commands and gaps describe their named snapshots; the executable manifests and split above govern current selection. No matrix row is accepted merely because its containing node is collected or passes.
 
 ## Readiness and evidence already available
 
@@ -350,15 +396,15 @@ Choose a validated media binary directory for subprocess PATH while invoking Pyt
 
 The original gap and worksheet below are retained as preparation history. Current implementation adds `Required Real Identity` alongside the existing regression job. Its fresh runner is the sole lifecycle owner; bootstrap uses explicit `--online`, pinned uv 0.12.23/Node 24.21.0, existing fixed images/auth libraries/Pi and actual Chromium/FFmpeg. Runtime downloads remain offline without an explicit flag or process proxy. No local proxy setting is committed. The job is mandatory and has no `continue-on-error`.
 
-`auth-runtime/ci.py` runs private bounded dependency probes, real service pause/resume controls, absent-library/binary calibration, restricted isolated business PG setup, reviewed suite phases, narrow owner-checked cleanup and sanitized outcome publication. Raw commands, assertions, browser URLs/cookies, mail and private configuration stay under mode-0700 state with mode-0600 logs. Published artifacts are reconstructed from reviewed node IDs/outcome enums and scanned against private fixture credentials; raw diagnostics are excluded.
+`auth-runtime/ci.py` runs private bounded dependency health checks, restricted isolated business PG setup, exact selected-node phases, narrow owner-checked cleanup and sanitized outcome publication. Real service pause/resume and absent-library/binary fault calibration require the human-selected manual suite. Raw commands, assertions, browser URLs/cookies, mail and private configuration stay under mode-0700 state with mode-0600 logs. Published artifacts are reconstructed from reviewed node IDs/outcome enums and scanned against private fixture credentials; raw diagnostics are excluded.
 
-`auth-runtime/required.py` requires exact equality of expected/collected/executed node IDs and passing setup/call/teardown, rejecting skip, xfail, xpass, empty/deselected/collect-only/missing nodes and teardown errors even when ordinary pytest would exit zero. The current catalog has 25 foundation, 148 storage/boundary, 39 BFF, 30 organization, 29 Studio, 33 Backlot, six actual-outage, 27 claim-calibration, four runtime-role/HTTPS and one authenticated-restore nodes: 342 total. These are **collected requirements, not a final integrated run**. #30/#31 and final #32 coordinated-native recovery nodes remain pending; `ci.py run` fails until their reviewed catalog is complete. No matrix variant is signed merely because a containing test node passes.
+`auth-runtime/required.py` requires exact equality of expected/collected/executed node IDs and passing setup/call/teardown, rejecting skip, xfail, xpass, empty/deselected/collect-only/missing nodes and teardown errors even when ordinary pytest would exit zero. The current 420-node catalog includes standard SSO/UI and coordinated Native recovery. Classification preserves every original requirement. Owner acceptance remains pending while each selected suite can run and fail honestly. No matrix variant is signed merely because a containing test node passes.
 
 Author preparation observations, pending exact-commit independent review: 15 operator/result-guard CLI cases passed; all 27 controlled-claim nodes passed with real native read-only membership; three distinct-role nodes passed with personal and organization real Pi/FFmpeg/browser deliveries; the native HTTPS custom-domain node passed with independently verified CA/SAN/TLS plus a received non-Secure witness cookie and absent Secure session cookie; the public whole-schema CLI backup/restore node passed on a separate empty database with original schema/key/cookie, exact media/Pi files, limited runtime principals and key rotation denials. Source schema and files remain retained. The early HTTPS headless-shell proxy behavior was independently isolated and resolved through standard full Chromium plus explicit test locale; no local proxy setting is committed. These observations do not mark the 113 final rows complete or substitute for coordinated Logto/IdP recovery, mandatory cold AMD64 CI, upstream SSO/UI or reviewer signoff.
 
 Cold AMD64 boot, final duration budgets, all real fault probes, upstream UI/SSO cases, node-to-variant observations, independent reviewer and exact-main CI remain PENDING. The initial 90-minute job/65-minute suite bounds must be checked against the actual final cold run. See [activation and recovery](identity-enable.md).
 
-Current `.github/workflows/ci.yml` runs one 30-minute **Validate Python** job: Python 3.11, Node 22.19.0, isolated PG, FFmpeg, `make install-studio-dev`, official `make studio-pi` + RPC check, Chromium, lint and `make test` (`tests/` only). It now generates a random masked `STUDIO_TEST_SESSION_KEY` at job runtime. It does **not** install uv, stage/start the identity environment, run `auth-runtime/tests/`, or account for all required identity variants.
+Historical CI before the required identity job ran one 30-minute **Validate Python** job: Python 3.11, Node 22.19.0, isolated PG, FFmpeg, official Pi/RPC, Chromium, lint and `make test`. The retained regression job now uses the explicit manual classification. The required identity job cold-boots native dependencies and executes the suite selected as described above.
 
 Cold-runner blocker: `auth-runtime/bootstrap.py` needs uv and appends `--offline` for dependency installation when no current-process HTTPS proxy is present. `auth-runtime/images.py` has `trust_env=False` and requires that proxy for every uncached verified blob. A cold AMD64 runner has neither the local ledger nor this host's cache/egress setup. Adding `bootstrap up` to CI alone cannot work. Runtime owner must first deliver and independently verify **explicit online CLI authorization** for cold dependencies/image staging while preserving offline default, proxy support, digest/platform/config/layer verification, private state, bounded failures and ownership checks. No flag name exists yet; do not infer authorization from `CI`, fake a proxy, turn networking on implicitly, or commit this host's network settings.
 
@@ -456,7 +502,7 @@ auth-runtime/.state/venv/bin/python -B -m pytest -p tests.conftest -p no:cachepr
   --junitxml="$AUTH32_EVIDENCE_DIR/regression-all.private.xml" tests/
 ```
 
-Final #27–31+#32 suites and variant/result guard are **not yet implemented**, so no fictional final required-node command is supplied. Add only owner-delivered reviewed nodes after manual dependency closure; collect each exact parameterized node and map the outcomes to every row. Preserve existing contract/Repository/API/Backlot/Pi/Worker/policy/cost/recovery/browser regression suites. Keep paid/live flags unset. The Python socket guard does not control browser/Node subprocess egress; restrict real browser traffic to exact app/Logto/standard IdP origins and use only the controlled local model/media profile. The current BFF helper's loopback-host allowlist is broader than that exact final allowlist and needs final verification.
+The final selected-node commands are now implemented above; scenario observations, human security acceptance and exact-candidate review remain required. Collect each exact parameterized node and map its outcome to every matrix row. Preserve existing contract/Repository/API/Backlot/Pi/Worker/policy/cost/recovery/browser regressions. Keep paid/live flags unset. The Python socket guard does not control browser/Node subprocess egress; restrict real browser traffic to exact app/Logto/standard IdP origins and use only the controlled local model/media profile. The BFF helper's broader loopback-host allowlist still needs its documented final verification.
 
 ### Released mapping/backup/restore, isolated operator rehearsal
 
