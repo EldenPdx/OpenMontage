@@ -1,7 +1,8 @@
 # Coordinated Native identity recovery acceptance
 
-This is the dedicated #32 validation drill. Its implementation is prepared; the
-Native lifecycle helper and real execution remain **PENDING**. All #30 and #31
+This is the dedicated #32 validation drill. The portable lifecycle helper is
+`auth-runtime/native_recovery.py`; real execution remains **PENDING** until its
+exact candidate report passes. All #30 and #31
 Native consumers must first report safe. The Orchestrator exclusively owns the
 helper, stop/recreate operations and private environment changes. The test does
 not run Docker lifecycle commands or create Native databases.
@@ -31,6 +32,13 @@ causes failure before service work. The plan has exactly these fields:
 {"schema_version":1,"run_id":"<32 lowercase hex>","owner_state_dir":"<absolute private lifecycle-owner .state>"}
 ```
 
+The CI owner first runs `native_recovery.py prepare --owner-state <owned .state>
+--control <new private directory>`. It starts `native_recovery.py serve --plan
+<plan.json> --timeout <bounded seconds>` alongside the required browser test.
+The helper validates the actual Compose working-directory labels before stopping
+writers. Its interruption handler restores original environments and services;
+the parent waits for that recovery before cleanup.
+
 `AUTH_TEST_FIXTURE` must point to that owner's unchanged `fixture-auth30.json`.
 `AUTH32_DATABASE_CONFIG_FILE` supplies the private source/target migration, BFF,
 Worker and original session-key inputs described in `identity-enable.md`. The
@@ -54,6 +62,11 @@ mounts. Keep the original databases, image provenance, private keys, service
 network namespace and all other fixture ledgers. Never drop an original
 database, re-seed a realm, change shared login policy, replace signing keys or
 deploy production.
+
+The pinned original database names are `auth_logto` and `auth_keycloak`.
+`logto` and `keycloak` in evidence label services rather than alternate source
+databases. Business-only and coordinated Native drills use separate empty target
+databases; neither drill clears the other's restored data.
 
 `request.json` is test-owned; `ack.json` is helper-owned. Write atomically with
 0600 permissions and fsync. Each has exactly:
@@ -146,8 +159,11 @@ cookie with the original key must return `me` 200 with its original subject and
 role and the exact authorized media bytes. Fresh real standard OIDC and SAML
 sign-ins must again bind the same Native subject, IdP identity, issuer, explicit
 membership and role, then read the original resource. The restored Worker starts
-with its real restricted DSN and preserves the completed task. An otherwise
-identical BFF with a wrong key must deny both `me` and media with 503.
+with its real restricted DSN and preserves the completed task. The separate
+manual test `test_coordinated_native_restore_rejects_a_wrong_session_key`
+retains the same full drill and also requires an otherwise identical BFF with a
+wrong key to deny both `me` and media with 503. Automatic positive restore does
+not execute that key-tampering case or report it as passed.
 
 After `original_ready`, the test independently verifies actual original database
 targets, Native health, pinned images, seal bytes, JWKS/metadata, exact private

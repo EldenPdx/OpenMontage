@@ -125,7 +125,7 @@ def business_snapshot(configuration, schema):
 
 def native_sql_snapshot(container, database):
     """Fixed read-only observation of the original pinned Native databases only."""
-    if not re.fullmatch(r"[a-f0-9]{64}", container) or database not in {"logto", "keycloak"}:
+    if not re.fullmatch(r"[a-f0-9]{64}", container) or database not in {"auth_logto", "auth_keycloak"}:
         raise RuntimeError("Native retention observation is restricted to the original owner databases")
     prefix = ["exec", "--env", "PGOPTIONS=-c default_transaction_read_only=on", container,
               "psql", "-X", "-qAt", "-U", "auth_bootstrap", "-d", database, "-v", "ON_ERROR_STOP=1", "-c"]

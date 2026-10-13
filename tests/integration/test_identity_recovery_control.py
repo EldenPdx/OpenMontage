@@ -2,9 +2,29 @@
 
 from concurrent.futures import ThreadPoolExecutor
 import json
+from pathlib import Path
+import subprocess
+import sys
 import time
 
 import pytest
+
+
+def test_native_recovery_operator_prepares_a_fresh_private_plan_without_services(tmp_path):
+    owner = tmp_path / "auth-runtime" / ".state"
+    owner.mkdir(mode=0o700, parents=True)
+    control = tmp_path / "control"
+    root = Path(__file__).resolve().parents[2]
+    result = subprocess.run([sys.executable, "-B", "auth-runtime/native_recovery.py", "prepare",
+        "--owner-state", str(owner), "--control", str(control)], cwd=root,
+        capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    plan = json.loads((control / "plan.json").read_text())
+    assert plan["schema_version"] == 1 and plan["owner_state_dir"] == str(owner)
+    assert len(plan["run_id"]) == 32 and all(character in "0123456789abcdef" for character in plan["run_id"])
+    assert (control / "plan.json").stat().st_mode & 0o777 == 0o600
+    assert control.stat().st_mode & 0o777 == 0o700
+    assert not (control / "request.json").exists()
 
 
 def write(path, value):
