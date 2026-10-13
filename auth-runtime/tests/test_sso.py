@@ -14,9 +14,89 @@ import xml.etree.ElementTree as ET
 
 import httpx
 import pytest
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from tests.fixtures.auth30 import ORIGIN, sso_browser
+
+
+@pytest.mark.parametrize("protocol,organization", [("oidc", "A"), ("saml", "B")])
+@pytest.mark.parametrize("provider", ["idp", "logto"])
+def test_browser_provider_network_failure_leaves_the_user_signed_out_and_allows_a_fresh_login(monkeypatch, protocol, organization, provider):
+    with sso_browser(monkeypatch) as sso:
+        context = sso.browser.new_context()
+        page = context.new_page()
+        endpoint = "http://127.0.0.1:" + ("8180" if provider == "idp" else "3010")
+        page.route(endpoint + "/**", lambda route: route.abort())
+        with page.expect_event("requestfailed", predicate=lambda request: request.url.startswith(endpoint + "/")):
+            if provider == "logto":
+                try:
+                    page.goto(ORIGIN + "/api/auth/login")
+                except PlaywrightError:
+                    pass
+            else:
+                page.goto(ORIGIN + "/api/auth/login")
+                page.locator('input[name="identifier"]').fill(sso.fixture.idp_login_credentials(protocol).email)
+                page.get_by_role("button", name="Sign in", exact=True).click()
+                page.get_by_role("button", name="Single Sign-On", exact=True).click()
+        assert context.request.get(ORIGIN + "/api/auth/me").status == 401
+        assert not any(value["name"] == "openmontage_session" for value in context.cookies(ORIGIN))
+        page.unroute(endpoint + "/**")
+        page.goto(ORIGIN + "/en")
+        assert page.url == ORIGIN + "/en"
+        context.close()
+        fresh, _ = sso.sign_in(protocol, organization=organization)
+        assert sso.callback_status == 303
+        assert sso.me(fresh)["role"] == "editor"
+        task = sso.create(fresh)
+        assert fresh.request.get(ORIGIN + "/api/studio/tasks/" + task["task_id"]).status == 200
+
+
+@pytest.mark.parametrize("protocol,organization", [("oidc", "A"), ("saml", "B")])
+def test_user_can_leave_the_enterprise_login_screen_and_sign_in_again(monkeypatch, protocol, organization):
+    with sso_browser(monkeypatch) as sso:
+        context = sso.browser.new_context()
+        page = context.new_page()
+        page.goto(ORIGIN + "/api/auth/login")
+        page.locator('input[name="identifier"]').fill(sso.fixture.idp_login_credentials(protocol).email)
+        page.get_by_role("button", name="Sign in", exact=True).click()
+        page.get_by_role("button", name="Single Sign-On", exact=True).click()
+        page.locator("#username").wait_for()
+        page.goto(ORIGIN + "/en")
+        assert page.url == ORIGIN + "/en"
+        assert context.request.get(ORIGIN + "/api/auth/me").status == 401
+        assert not any(value["name"] == "openmontage_session" for value in context.cookies(ORIGIN))
+        context.close()
+        fresh, _ = sso.sign_in(protocol, organization=organization)
+        assert sso.callback_status == 303
+        assert sso.me(fresh)["role"] == "editor"
+        task = sso.create(fresh)
+        assert fresh.request.get(ORIGIN + "/api/studio/tasks/" + task["task_id"]).status == 200
+
+
+@pytest.mark.parametrize("protocol,organization", [("oidc", "A"), ("saml", "B")])
+def test_standard_enterprise_logout_returns_to_the_application_signed_out(monkeypatch, protocol, organization):
+    with sso_browser(monkeypatch) as sso:
+        context, page = sso.sign_in(protocol, organization=organization)
+        me = sso.me(context)
+        task = sso.create(context)
+        resource = ORIGIN + "/api/studio/tasks/" + task["task_id"]
+        assert context.request.get(resource).status == 200
+        logout = context.request.post(ORIGIN + "/api/auth/logout", data={}, headers={
+            "Origin": ORIGIN, "X-CSRF-Token": me["csrf_token"], "X-Auth-Context": me["context_id"]})
+        assert logout.status == 200
+        assert context.request.get(ORIGIN + "/api/auth/me").status == 401
+        assert context.request.get(resource).status == 401
+        assert not any(value["name"] == "openmontage_session" for value in context.cookies(ORIGIN))
+        page.goto(logout.json()["logout_url"])
+        try:
+            page.wait_for_url(ORIGIN + "/en", timeout=5000)
+        except PlaywrightTimeoutError:
+            page.get_by_role("button", name=re.compile(r"^(Yes|Sign out|Continue)$", re.I)).click()
+        page.wait_for_url(ORIGIN + "/en")
+        page.goto(ORIGIN + "/api/auth/login")
+        page.locator('input[name="identifier"]').wait_for()
+        assert context.request.get(ORIGIN + "/api/auth/me").status == 401
 
 
 @pytest.mark.parametrize("protocol,organization", [("oidc", "A"), ("saml", "B")])
