@@ -13,6 +13,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -260,8 +261,9 @@ def phase(name, definition):
     environment = {**os.environ, "PYTHONPATH": os.pathsep.join((str(ROOT), str(ROOT / "auth-runtime"))),
                    "STUDIO_REQUIRE_INTEGRATION": "1", "PYTHONDONTWRITEBYTECODE": "1", "PYTHON_DOTENV_DISABLED": "1",
                    "AUTH_SSO_VENDOR_ROOT": str(STATE / "sso-vendor")}
-    temporary = EVIDENCE / (name + "-tmp-" + secrets.token_hex(8))
-    temporary.mkdir(mode=0o700, parents=True)
+    temporary = Path(tempfile.mkdtemp(prefix="om-auth32-", dir="/tmp")).resolve()
+    private_json(EVIDENCE / (name + "-temporary.json"),
+                 {"run_id": os.environ.get("AUTH32_VALIDATION_RUN_ID"), "directory": str(temporary)})
     environment["TMPDIR"] = str(temporary)
     for key in ("OPENMONTAGE_ALLOW_NETWORK", "STUDIO_XVAN_LIVE_SMOKE", "STUDIO_XVAN_PAID_APPROVED", "OPENMONTAGE_AUTH_CONFIG_FILE", "OPENMONTAGE_AUTH_MODE", "PYTEST_ADDOPTS"):
         environment.pop(key, None)

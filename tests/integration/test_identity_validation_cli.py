@@ -238,12 +238,15 @@ def test_required_phases_use_fresh_private_standard_library_temp_roots(tmp_path)
     old.mkdir()
     (old / "retained.txt").write_text("retained caller data")
     (tmp_path / "test_entry.py").write_text(
-        "import os,tempfile\nfrom pathlib import Path\ndef test_reviewed():\n"
+        "import os,tempfile\nfrom pathlib import Path\nfrom multiprocessing import Manager\ndef test_reviewed():\n"
         "    with tempfile.TemporaryDirectory() as name:\n"
         "        parent=Path(name).parent\n"
         "        assert str(parent)!=os.environ['CALLER_TEMP']\n"
         "        assert parent.stat().st_mode & 0o777 == 0o700\n"
-        "        Path('observed.txt').write_text(str(parent))\n")
+        "        Path('observed.txt').write_text(str(parent))\n"
+        "        with Manager() as manager:\n"
+        "            values=manager.list();values.append('ordinary media submission')\n"
+        "            assert list(values)==['ordinary media submission']\n")
     definition = {"runtime": False, "timeout_seconds": 10, "nodes": ["test_entry.py::test_reviewed"]}
     script = "import sys;sys.path.insert(0,'auth-runtime');import ci;ci.phase('tracer'," + repr(definition) + ")"
     environment = {**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "TMPDIR": str(old), "CALLER_TEMP": str(old)}
