@@ -124,7 +124,7 @@ lint: ensure-venv
 	$(RUN_PYTHON) -m py_compile tools/tool_registry.py
 	$(RUN_PYTHON) -m py_compile tools/cost_tracker.py
 	$(RUN_PYTHON) -m py_compile tools/analysis/composition_validator.py
-	$(RUN_PYTHON) -m compileall -q production pi-runtime
+	$(RUN_PYTHON) -m compileall -q production pi-runtime auth-runtime
 	node --check pi-runtime/install.mjs
 	node --check backlot/ui/studio.js
 	node --check backlot/ui/board.js
@@ -134,6 +134,12 @@ lint: ensure-venv
 	node --check backlot/ui/library-i18n.js
 	node --check backlot/ui/studio-i18n.js
 	node --check backlot/ui/board-i18n.js
+	node --check backlot/ui/session.js
+	node --check backlot/ui/account.js
+	node --check backlot/ui/account-i18n.js
+	node --check backlot/ui/invitation.js
+	node --check backlot/ui/invitation-ticket.js
+	node --check auth-runtime/sso/policy.mjs
 
 clean:
 	$(BASE_PYTHON) -c "import pathlib, shutil; excluded=[pathlib.Path('$(VENV_DIR)'), pathlib.Path('venv')]; skip=lambda p: any(p == root or root in p.parents for root in excluded); roots=[p for p in pathlib.Path('.').rglob('__pycache__') if not skip(p)]; [shutil.rmtree(p) for p in roots]; files=[p for p in pathlib.Path('.').rglob('*.pyc') if not skip(p)]; [p.unlink() for p in files]"
