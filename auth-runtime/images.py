@@ -186,7 +186,9 @@ def stage_images(state, *, online=False):
         records[name] = {**pin, "platform_manifest": manifest_digest, "config_digest": config_digest,
                          "image_id": inspected["Id"], "local_tag": tag, "platform": "/".join(platform)}
         print(f"Verified and staged {name} {pin['version']} ({'/'.join(platform)})", flush=True)
-    (cache / "loaded.json").write_text(json.dumps(records, indent=2) + "\n")
+    loaded_record = cache / "loaded.json"
+    loaded_record.write_text(json.dumps(records, indent=2) + "\n")
+    loaded_record.chmod(0o600)
     return records
 
 
