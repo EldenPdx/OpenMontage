@@ -31,6 +31,30 @@ def private_json(path, value):
         stream.write("\n")
 
 
+def validation_plan(suite):
+    catalog = json.loads((ROOT / "auth-runtime/required-nodes.json").read_text())
+    manual = json.loads((ROOT / "auth-runtime/manual-security.json").read_text())
+    functions = set(manual["functions"])
+    all_nodes = [node for definition in catalog["phases"].values() for node in definition["nodes"]]
+    if len(all_nodes) != len(set(all_nodes)) or not functions or functions - {node.split("[", 1)[0] for node in all_nodes}:
+        raise RuntimeError("Required identity catalog must uniquely account for every explicit manual security function")
+    phases = {}
+    manual_nodes = []
+    for name, definition in catalog["phases"].items():
+        selected = []
+        for node in definition["nodes"]:
+            is_manual = node.split("[", 1)[0] in functions
+            if is_manual:
+                manual_nodes.append(node)
+            if is_manual == (suite == "manual-security"):
+                selected.append(node)
+        if selected:
+            phases[name] = {**definition, "nodes": selected, "suite": suite}
+    return {"suite": suite, "phases": phases, "manual_pending": sorted(manual_nodes),
+            "manual_regression_functions": sorted(functions), "manual_checklist": manual["checklist"],
+            "acceptance_pending_owners": catalog["pending_owners"], "acceptance_status": "PENDING"}
+
+
 def execute(name, arguments, *, environment=None, timeout=300, expected_success=True):
     EVIDENCE.mkdir(parents=True, exist_ok=True, mode=0o700)
     descriptor = os.open(EVIDENCE / (name + ".log"), os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
@@ -111,13 +135,14 @@ def business_account():
             connection.execute(sql.SQL("CREATE ROLE {} LOGIN PASSWORD {} NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS").format(sql.Identifier(role), sql.Literal(password)))
             privileges = sql.SQL("CONNECT,CREATE") if role in {"auth32_test", "auth32_bootstrap"} else sql.SQL("CONNECT")
             connection.execute(sql.SQL("GRANT {} ON DATABASE {} TO {}").format(privileges, sql.Identifier(database), sql.Identifier(role)))
-        if connection.execute("SELECT 1 FROM pg_database WHERE datname='studio_identity_restore'").fetchone():
-            raise RuntimeError("Fresh identity CI restore database already exists")
-        connection.execute("CREATE DATABASE studio_identity_restore")
-        connection.execute("REVOKE ALL ON DATABASE studio_identity_restore FROM PUBLIC")
-        for role in ("auth32_bootstrap", "auth32_bff", "auth32_worker"):
-            privileges = sql.SQL("CONNECT,CREATE") if role == "auth32_bootstrap" else sql.SQL("CONNECT")
-            connection.execute(sql.SQL("GRANT {} ON DATABASE studio_identity_restore TO {}").format(privileges, sql.Identifier(role)))
+        for target in ("studio_identity_restore", "studio_identity_native_restore"):
+            if connection.execute("SELECT 1 FROM pg_database WHERE datname=%s", (target,)).fetchone():
+                raise RuntimeError("Fresh identity CI restore database already exists")
+            connection.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(target)))
+            connection.execute(sql.SQL("REVOKE ALL ON DATABASE {} FROM PUBLIC").format(sql.Identifier(target)))
+            for role in ("auth32_bootstrap", "auth32_bff", "auth32_worker"):
+                privileges = sql.SQL("CONNECT,CREATE") if role == "auth32_bootstrap" else sql.SQL("CONNECT")
+                connection.execute(sql.SQL("GRANT {} ON DATABASE {} TO {}").format(privileges, sql.Identifier(target), sql.Identifier(role)))
     fields = conninfo_to_dict(bootstrap)
     dsns = {role: make_conninfo(**{**fields, "user": role, "password": password}) for role, password in passwords.items()}
     os.environ["STUDIO_TEST_DATABASE_URL"] = dsns["auth32_test"]
@@ -129,6 +154,10 @@ def business_account():
     role_configuration.update({"target_" + field + "_database_url": make_conninfo(**{**fields, "dbname": "studio_identity_restore", "user": "auth32_" + field,
                                "password": passwords["auth32_" + field]}) for field in ("bootstrap", "bff", "worker")})
     private_json(role_path, role_configuration)
+    native_configuration = {**role_configuration, **{"target_" + field + "_database_url": make_conninfo(
+        **{**fields, "dbname": "studio_identity_native_restore", "user": "auth32_" + field, "password": passwords["auth32_" + field]})
+        for field in ("bootstrap", "bff", "worker")}}
+    private_json(STATE / "ci-native-runtime-roles.json", native_configuration)
     os.environ["AUTH32_DATABASE_CONFIG_FILE"] = str(role_path)
     with psycopg.connect(os.environ["STUDIO_TEST_DATABASE_URL"]) as connection:
         flags = connection.execute("SELECT rolsuper,rolcreatedb,rolcreaterole,rolreplication,rolbypassrls FROM pg_roles WHERE rolname=current_user").fetchone()
@@ -231,6 +260,8 @@ def phase(name, definition):
                    "AUTH_SSO_VENDOR_ROOT": str(STATE / "sso-vendor")}
     for key in ("OPENMONTAGE_ALLOW_NETWORK", "STUDIO_XVAN_LIVE_SMOKE", "STUDIO_XVAN_PAID_APPROVED", "OPENMONTAGE_AUTH_CONFIG_FILE", "OPENMONTAGE_AUTH_MODE", "PYTEST_ADDOPTS"):
         environment.pop(key, None)
+    if definition.get("database_config"):
+        environment["AUTH32_DATABASE_CONFIG_FILE"] = str(STATE / definition["database_config"])
     namespace = definition.get("namespace")
     if namespace:
         origin = definition["origin"]
@@ -258,6 +289,9 @@ def phase(name, definition):
                 fixture._data["resources"].append({"path": "/api/applications/" + application["id"], "key": "name", "name": name_tls})
                 private_json(path, fixture._data)
         environment["AUTH_TEST_FIXTURE"] = str(path)
+        if namespace == "auth30":
+            execute("prepare-sso-" + name, [sys.executable, "-B", "auth-runtime/ci.py", "prepare-sso"],
+                    environment=environment, timeout=180)
     else:
         environment.pop("AUTH_TEST_FIXTURE", None)
     nodes = definition["nodes"]
@@ -267,8 +301,36 @@ def phase(name, definition):
                  "--rootdir=" + str(ROOT), "--required-nodes=" + str(manifest), "--required-report=" + str(report), "--basetemp=" + str(EVIDENCE / (name + "-tmp"))]
     if definition["runtime"] and not any(node.startswith("tests/") for node in nodes):
         arguments += ["-p", "tests.conftest"]
-    arguments += sorted({node.split("::", 1)[0] for node in nodes})
-    if not definition.get("outages"):
+    if definition.get("suite") == "manual-security":
+        arguments += ["--include-manual-security"]
+    arguments += nodes
+    if definition.get("coordinated_restore"):
+        control = EVIDENCE / (name + "-recovery-" + secrets.token_hex(8))
+        execute("prepare-" + name, [sys.executable, "-B", "auth-runtime/native_recovery.py", "prepare",
+                "--owner-state", str(STATE), "--control", str(control)], environment=environment, timeout=15)
+        environment["AUTH32_NATIVE_RECOVERY_PLAN"] = str(control / "plan.json")
+        descriptor = os.open(EVIDENCE / (name + "-operator.log"), os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w") as log:
+            operator = subprocess.Popen([sys.executable, "-B", "auth-runtime/native_recovery.py", "serve", "--plan",
+                str(control / "plan.json"), "--timeout", str(definition["timeout_seconds"])], cwd=ROOT, env=environment,
+                stdout=log, stderr=subprocess.STDOUT)
+            active = EVIDENCE / "active-native-recovery.json"
+            try:
+                private_json(active, {"pid": operator.pid, "plan": str(control / "plan.json")})
+                execute(name, arguments, environment=environment, timeout=definition["timeout_seconds"])
+                if operator.wait(timeout=600):
+                    raise RuntimeError("Required Native recovery operator did not restore and verify the original services")
+            finally:
+                if operator.poll() is None:
+                    operator.terminate()
+                    try:
+                        operator.wait(timeout=600)
+                    except subprocess.TimeoutExpired:
+                        raise RuntimeError("Native recovery operator is still restoring; retain private state and verify original services before cleanup") from None
+                if operator.poll() is not None:
+                    active.unlink(missing_ok=True)
+    elif not definition.get("outages"):
         execute(name, arguments, environment=environment, timeout=definition["timeout_seconds"])
     else:
         control = EVIDENCE / "outage-control.json"
@@ -310,6 +372,14 @@ def phase(name, definition):
 
 
 def cleanup():
+    active = EVIDENCE / "active-native-recovery.json"
+    if active.is_file():
+        value = json.loads(active.read_text())
+        if type(value.get("pid")) is not int or value["pid"] <= 0 or not isinstance(value.get("plan"), str):
+            raise RuntimeError("Invalid retained Native recovery operator record; verify original recovery before cleanup")
+        observed = subprocess.run(["ps", "-p", str(value["pid"]), "-o", "args="], capture_output=True, text=True, timeout=5)
+        if observed.returncode == 0 and "auth-runtime/native_recovery.py serve" in observed.stdout and value["plan"] in observed.stdout:
+            raise RuntimeError("Native recovery operator is still active; verify original recovery before cleanup")
     import manage
     manage.assert_ownership()
     for service in ("logto", "identity-postgres", "keycloak", "mailpit"):
@@ -319,30 +389,92 @@ def cleanup():
     execute("cleanup", [sys.executable, "-B", "auth-runtime/manage.py", "down"], timeout=120)
 
 
+def prepare_sso():
+    paths = (STATE / "credentials.json", STATE / "fixture-auth30.json")
+    if not STATE.is_dir() or STATE.resolve() != STATE or STATE.stat().st_mode & 0o077 or any(
+        not path.is_file() or path.is_symlink() or path.stat().st_mode & 0o077 for path in paths):
+        raise RuntimeError("SSO fixture setup requires this checkout's private lifecycle-owner state")
+    import manage
+    manage.assert_ownership()
+    manage.check_sso_runtime()
+    sys.path.insert(0, str(ROOT))
+    import pytest
+    from tests.fixtures.auth30 import sso_browser
+    with pytest.MonkeyPatch.context() as monkeypatch, sso_browser(monkeypatch) as sso:
+        saved = sso.fixture._data.setdefault("sso_subjects", {})
+        for protocol in ("oidc", "saml"):
+            context, _ = sso.sign_in(protocol)
+            principal = sso.record_principal(context, protocol)
+            if principal["email"] != principal["fixture_idp_email"] or principal["native_subject"] in {user.id for user in sso.fixture.users.values()}:
+                raise RuntimeError("Fresh enterprise fixture identity did not bind its actual standard IdP subject")
+            previous = saved.get(protocol)
+            if previous and any(previous[key] != principal[key] for key in ("connector_id", "native_subject", "sso_identity_id", "sso_issuer")):
+                raise RuntimeError("Frozen enterprise fixture principal changed")
+            saved[protocol] = principal
+            context.close()
+        if saved["oidc"]["native_subject"] == saved["saml"]["native_subject"]:
+            raise RuntimeError("Standard fixture protocols require distinct actual enterprise identities")
+        private_json(sso.fixture.path, sso.fixture._data)
+        for protocol, organization, role in (("oidc", "A", "editor"), ("saml", "A", "viewer"), ("saml", "B", "editor")):
+            organization_id, subject = sso.fixture.organizations[organization], saved[protocol]["native_subject"]
+            members = sso.fixture.api.items("/api/organizations/" + organization_id + "/users")
+            if subject not in {member["id"] for member in members}:
+                sso.fixture.api.request("POST", "/api/organizations/" + organization_id + "/users", {"userIds": [subject]})
+            sso.fixture.api.request("PUT", "/api/organizations/" + organization_id + "/users/" + subject + "/roles",
+                                   {"organizationRoleIds": [sso.fixture._data["roles"][role]]})
+            context, _ = sso.sign_in(protocol, organization=organization)
+            current = sso.me(context)
+            if current["role"] != role or current["workspace"]["key"] != "organization:" + organization_id:
+                raise RuntimeError("Actual enterprise membership did not reach its explicitly granted BFF role")
+            if role == "editor":
+                task = sso.create(context)
+                if context.request.get("http://127.0.0.1:4765/api/studio/tasks/" + task["task_id"]).status != 200:
+                    raise RuntimeError("Enterprise fixture member cannot read its actual owned resource")
+            context.close()
+
+
 def publish():
     """Publish only reviewed node outcomes; raw assertions and private state stay on the runner."""
-    catalog = json.loads((ROOT / "auth-runtime/required-nodes.json").read_text())
     summary = json.loads((EVIDENCE / "summary.json").read_text()) if (EVIDENCE / "summary.json").is_file() else {}
-    public = {}
-    for name, definition in catalog["phases"].items():
-        path = EVIDENCE / (name + "-result.json")
-        if not path.is_file():
-            continue
-        result = json.loads(path.read_text())
-        if not summary.get("run_id") or result.get("run_id") != summary["run_id"]:
-            continue
-        records = {}
-        for node in definition["nodes"]:
-            phases = result.get("nodes", {}).get(node, {})
-            records[node] = {}
-            for stage in ("setup", "call", "teardown"):
-                values = phases.get(stage, [])
-                if any(value.get("outcome") not in {"passed", "failed", "skipped"} or type(value.get("xfail")) is not bool for value in values):
-                    raise RuntimeError("Unsafe identity outcome artifact")
-                records[node][stage] = [{"outcome": value["outcome"], "xfail": value["xfail"]} for value in values]
-        public[name] = {"passed": result.get("passed") is True, "nodes": records}
     sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-    report = {"candidate": sha, "run_id": summary.get("run_id"), "completed": summary.get("passed") is True and summary.get("candidate") == sha, "phases": public}
+    public = {}
+    passed = {}
+    manual_passed_nodes = set()
+    for suite in ("automated", "manual-security"):
+        plan = validation_plan(suite)
+        receipt_path = EVIDENCE / ("summary-" + suite + ".json")
+        receipt = json.loads(receipt_path.read_text()) if receipt_path.is_file() else summary if summary.get("suite", "automated") == suite else {}
+        public[suite] = {}
+        if receipt.get("candidate") == sha and receipt.get("run_id"):
+            for name, definition in plan["phases"].items():
+                path = EVIDENCE / (name + ("-manual-security" if suite == "manual-security" else "") + "-result.json")
+                if not path.is_file():
+                    continue
+                result = json.loads(path.read_text())
+                if result.get("run_id") != receipt["run_id"]:
+                    continue
+                records = {}
+                for node in definition["nodes"]:
+                    phases = result.get("nodes", {}).get(node, {})
+                    records[node] = {}
+                    for stage in ("setup", "call", "teardown"):
+                        values = phases.get(stage, [])
+                        if any(value.get("outcome") not in {"passed", "failed", "skipped"} or type(value.get("xfail")) is not bool for value in values):
+                            raise RuntimeError("Unsafe identity outcome artifact")
+                        records[node][stage] = [{"outcome": value["outcome"], "xfail": value["xfail"]} for value in values]
+                    if suite == "manual-security" and all(values and all(value == {"outcome": "passed", "xfail": False} for value in values) for values in records[node].values()):
+                        manual_passed_nodes.add(node)
+                complete_nodes = set(result.get("nodes", {})) == set(definition["nodes"]) and all(
+                    values and all(value == {"outcome": "passed", "xfail": False} for value in values)
+                    for stages in records.values() for values in stages.values())
+                public[suite][name] = {"passed": result.get("passed") is True and complete_nodes, "nodes": records}
+        passed[suite] = receipt.get("passed") is True and receipt.get("candidate") == sha and bool(plan["phases"]) and set(public[suite]) == set(plan["phases"]) and all(value["passed"] for value in public[suite].values())
+    pending_owners = plan["acceptance_pending_owners"]
+    complete = all(passed.values()) and not pending_owners
+    report = {"candidate": sha, "run_id": summary.get("run_id"), "completed": complete,
+              "automated_passed": passed["automated"], "manual_security_passed": passed["manual-security"],
+              "manual_pending": sorted(set(plan["manual_pending"]) - manual_passed_nodes),
+              "acceptance_pending_owners": pending_owners, "acceptance_status": "PASSED" if complete else "PENDING", "phases": public}
     serialized = json.dumps(report, ensure_ascii=True, indent=2)
     secret_fields = {"password", "app_secret", "bootstrap_app_secret", "pg_bootstrap", "logto_db", "keycloak_db", "keycloak_admin", "STUDIO_TEST_DATABASE_URL", "STUDIO_TEST_SESSION_KEY",
                      "bootstrap_database_url", "bff_database_url", "worker_database_url", "session_encryption_key",
@@ -358,7 +490,7 @@ def publish():
         elif field in secret_fields and isinstance(value, str) and len(value) >= 16 and value in serialized:
             raise RuntimeError("Identity artifact secret scan failed")
 
-    for path in [STATE / "credentials.json", STATE / "ci-business.json", STATE / "ci-runtime-roles.json", *STATE.glob("fixture*.json"), *STATE.glob("idp*.json")]:
+    for path in [STATE / "credentials.json", STATE / "ci-business.json", STATE / "ci-runtime-roles.json", STATE / "ci-native-runtime-roles.json", *STATE.glob("fixture*.json"), *STATE.glob("idp*.json")]:
         if path.is_file():
             scan(json.loads(path.read_text()))
     private_json(EVIDENCE / "public/outcomes.json", report)
@@ -367,12 +499,19 @@ def publish():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("dependencies", "run", "cleanup", "publish"))
+    parser.add_argument("command", choices=("dependencies", "plan", "prepare-sso", "run", "cleanup", "publish"))
     parser.add_argument("--dependency", choices=DEPENDENCIES + tuple("library:" + name for name in PACKAGES))
     parser.add_argument("--candidate", help="Exact immutable candidate Git SHA required for acceptance")
+    parser.add_argument("--suite", choices=("automated", "manual-security"), default="automated",
+                        help="Normal verification by default; security scenarios require explicit human selection")
     args = parser.parse_args()
     os.umask(0o077)
-    if args.command == "dependencies":
+    if args.command == "plan":
+        print(json.dumps(validation_plan(args.suite), indent=2))
+    elif args.command == "prepare-sso":
+        prepare_sso()
+        print("Actual standard SSO fixture principals and explicit member roles prepared")
+    elif args.command == "dependencies":
         dependencies([args.dependency] if args.dependency else [*("library:" + package for package in PACKAGES), *DEPENDENCIES])
         print("Required dependency checks passed")
     elif args.command == "cleanup":
@@ -383,13 +522,14 @@ def main():
     else:
         sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
         os.environ["AUTH32_VALIDATION_RUN_ID"] = secrets.token_hex(16)
-        receipt = {"candidate": sha, "passed": False, "run_id": os.environ["AUTH32_VALIDATION_RUN_ID"], "started_at": datetime.now(timezone.utc).isoformat()}
+        receipt = {"candidate": sha, "passed": False, "suite": args.suite, "run_id": os.environ["AUTH32_VALIDATION_RUN_ID"], "started_at": datetime.now(timezone.utc).isoformat()}
         private_json(EVIDENCE / "summary.json", receipt)
+        private_json(EVIDENCE / ("summary-" + args.suite + ".json"), receipt)
         if sha != args.candidate or subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=no"], cwd=ROOT):
             raise RuntimeError("Required identity acceptance needs the exact clean candidate")
-        catalog = json.loads((ROOT / "auth-runtime/required-nodes.json").read_text())
-        if catalog["pending_owners"]:
-            raise RuntimeError("Final identity suite is incomplete; reviewed upstream nodes are still required")
+        plan = validation_plan(args.suite)
+        if not plan["phases"]:
+            raise RuntimeError("Selected identity verification suite has no required nodes")
         import manage
         manage.assert_ownership()
         business_account()
@@ -399,10 +539,12 @@ def main():
                      "packages": {package: version(package) for package in PACKAGES},
                      "images": json.loads((STATE / "images/loaded.json").read_text())})
         dependency_failures()
-        for name, definition in catalog["phases"].items():
-            phase(name, definition)
-        private_json(EVIDENCE / "summary.json", {**receipt, "passed": True, "completed_at": datetime.now(timezone.utc).isoformat(), "phases": list(catalog["phases"])})
-        print("Required real identity acceptance passed for " + sha)
+        for name, definition in plan["phases"].items():
+            phase(name + ("-manual-security" if args.suite == "manual-security" else ""), definition)
+        receipt.update(passed=True, completed_at=datetime.now(timezone.utc).isoformat(), phases=list(plan["phases"]))
+        private_json(EVIDENCE / "summary.json", receipt)
+        private_json(EVIDENCE / ("summary-" + args.suite + ".json"), receipt)
+        print("Required " + args.suite + " verification passed for " + sha + "; full acceptance remains PENDING until both suites and owner signoffs are recorded")
 
 
 if __name__ == "__main__":
