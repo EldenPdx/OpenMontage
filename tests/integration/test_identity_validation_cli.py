@@ -128,6 +128,7 @@ def test_validation_plan_keeps_real_login_automatic_and_protocol_checks_pending(
     catalog = json.loads((ROOT / "auth-runtime/required-nodes.json").read_text())
     assert automatic | manual == {node for definition in catalog["phases"].values() for node in definition["nodes"]}
     assert plan["suite"] == "automated" and plan["acceptance_status"] == "PENDING"
+    assert plan["manual_pending_operations"] == ["dependency-failure-calibration"]
 
 
 def test_restore_plans_use_separate_empty_database_targets():
