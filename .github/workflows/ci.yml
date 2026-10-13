@@ -86,3 +86,98 @@ jobs:
         env:
           STUDIO_TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
         run: make test
+
+  identity:
+    name: Required Real Identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      postgres:
+        image: postgres:17.11-alpine
+        env:
+          POSTGRES_DB: studio_identity
+          POSTGRES_USER: auth32_ci_bootstrap
+          POSTGRES_PASSWORD: ci-local-test-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U auth32_ci_bootstrap -d studio_identity"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      STUDIO_TEST_BOOTSTRAP_DATABASE_URL: postgresql://auth32_ci_bootstrap:ci-local-test-only@127.0.0.1:5432/studio_identity
+      STUDIO_REQUIRE_INTEGRATION: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHON_DOTENV_DISABLED: "1"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            requirements-auth.txt
+            requirements-studio.txt
+            requirements-studio-dev.txt
+
+      - name: Set up the pinned Pi Node runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.21.0"
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install pinned identity dependencies and uv
+        run: |
+          make install-studio-dev
+          .venv/bin/python -m pip install uv==0.12.23
+
+      - name: Build official pinned Pi and check real RPC
+        run: make studio-pi && .venv/bin/python -B pi-runtime/check.py
+
+      - name: Install Chromium for real browser verification
+        run: .venv/bin/python -m playwright install --with-deps chromium
+
+      - name: Run lint smoke checks
+        run: make lint
+
+      - name: Cold boot the pinned native identity environment
+        timeout-minutes: 20
+        run: |
+          umask 077
+          .venv/bin/python -B auth-runtime/bootstrap.py --online up
+
+      - name: Run every required real identity phase
+        timeout-minutes: 65
+        env:
+          STUDIO_TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: .venv/bin/python -B auth-runtime/ci.py run --candidate "$GITHUB_SHA"
+
+      - name: Stop only this checkout's identity services
+        if: ${{ always() }}
+        run: |
+          if test -f auth-runtime/.state/credentials.json && test -x .venv/bin/python; then
+            .venv/bin/python -B auth-runtime/ci.py cleanup
+          fi
+
+      - name: Prepare sanitized required-node outcomes
+        if: ${{ always() }}
+        run: |
+          if test -x .venv/bin/python; then
+            .venv/bin/python -B auth-runtime/ci.py publish
+          fi
+
+      - name: Retain sanitized outcomes
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: required-identity-outcomes
+          path: auth-runtime/.state/validation/public/outcomes.json
+          include-hidden-files: true
+          if-no-files-found: ignore
