@@ -1,66 +1,39 @@
 import { el, getJSON, fmtMoney } from "/ui/lib.js";
 import { t, localePath, initI18n, languageTabs } from "/ui/i18n.js";
 import "/ui/studio-i18n.js";
-
-function clientError(message) {
-  const error = new Error(t(message));
-  error.i18nKey = message;
-  return error;
-}
+import "/ui/account.js";
+import { authScope, activeScope, can, scopedKey, savedRequest, session, writeJSON, scopedSource } from "/ui/session.js";
 
 let configPromise;
+let configScope;
 export function studioConfig(refresh = false) {
-  if (!configPromise || refresh) configPromise = getJSON("/api/studio/config").catch((error) => { configPromise = null; throw error; });
-  return configPromise;
+  return session().then(() => {
+    const scope = authScope();
+    if (!configPromise || refresh || configScope !== scope) {
+      configScope = scope;
+      configPromise = getJSON("/api/studio/config").catch((error) => { if (configScope === scope) configPromise = null; throw error; });
+    }
+    return configPromise;
+  });
 }
 
 export async function studioAction(path, body) {
-  const storageKey = `backlot.studio.pending:${path}`;
-  const encoded = JSON.stringify(body);
-  let pending = JSON.parse(localStorage.getItem(storageKey) || "null");
-  if (pending && pending.body !== encoded) throw clientError("The previous request outcome is unconfirmed. Refresh this task before choosing another action.");
-  if (!pending) {
-    pending = { key: crypto.randomUUID(), body: encoded };
-    localStorage.setItem(storageKey, JSON.stringify(pending));
-  }
-  let config = await studioConfig();
-  let response;
-  try {
-    const send = () => fetch(path, { method: "POST", credentials: "same-origin", headers: {
-      "Content-Type": "application/json", "X-CSRF-Token": config.csrf_token, "Idempotency-Key": pending.key,
-    }, body: pending.body });
-    response = await send();
-    if (response.status === 403) { config = await studioConfig(true); response = await send(); }
-  } catch {
-    throw clientError("Connection lost. The request key is saved; retry this same action to confirm its outcome.");
-  }
-  let result;
-  try { result = await response.json(); }
-  catch { throw clientError("The service response is unconfirmed. The request key is saved; retry this same action."); }
-  if (!response.ok) {
-    if (response.status < 500) localStorage.removeItem(storageKey);
-    const error = result.error?.message ? new Error(result.error.message) : clientError("The task request failed.");
-    error.serverMessage = !!result.error?.message;
-    error.status = response.status;
-    throw error;
-  }
-  localStorage.removeItem(storageKey);
-  return result;
+  return writeJSON(path, body, { localConfig: studioConfig });
 }
 
 export function subscribeTask(taskId, onChange) {
-  const cursorKey = `backlot.studio.cursor:${taskId}`;
-  const cursor = Number(sessionStorage.getItem(cursorKey) || 0);
-  const source = new EventSource(`/api/studio/tasks/${encodeURIComponent(taskId)}/events?after=${cursor}`);
-  for (const name of ["state", "stage", "approval", "progress", "cost", "error", "result", "recovery", "resync", "end"]) {
-    source.addEventListener(name, (event) => {
-      if (event.lastEventId) sessionStorage.setItem(cursorKey, event.lastEventId);
-      if (name === "end") source.close();
-      onChange();
-    });
-  }
-  source.onerror = () => onChange();
-  return source;
+  const scope = authScope();
+  const cursorKey = scopedKey(`backlot.studio.cursor:${taskId}`);
+  return scopedSource(() => `/api/studio/tasks/${encodeURIComponent(taskId)}/events?after=${Number(sessionStorage.getItem(cursorKey) || 0)}`, (source, subscription) => {
+    for (const name of ["state", "stage", "approval", "progress", "cost", "error", "result", "recovery", "resync", "end"]) {
+      source.addEventListener(name, (event) => {
+        if (!activeScope(scope)) { subscription.close(); return; }
+        if (event.lastEventId) sessionStorage.setItem(cursorKey, event.lastEventId);
+        if (name === "end") subscription.close();
+        onChange();
+      });
+    }
+  }, () => { if (activeScope(scope)) onChange(); });
 }
 
 export function stateLabel(value) {
@@ -118,10 +91,10 @@ async function initializeStudio() {
     profileInfo();
   }
   function profileInfo() {
-    const profile = config.profiles.find((item) => item.profile_id === profileSelect.value);
+    const profile = config?.profiles.find((item) => item.profile_id === profileSelect.value);
     document.getElementById("profile-info").textContent = profile
       ? `${profile.provider} · ${profile.model} · ${t(profile.price_status === "unquoted" ? "Fees are unquoted; the budget is an estimate." : "Estimated pricing configured.")}` : t("No configured profile is available.");
-    submit.disabled = submitting || !config.ready || !profile?.ready;
+    submit.disabled = submitting || !config?.ready || !profile?.ready || !can("production:create");
   }
   function taskCard(task, current = false) {
     const actions = el("div", { class: "studio-task-actions" },
@@ -135,7 +108,7 @@ async function initializeStudio() {
         finally { cancellingId = null; }
         await refresh().catch((error) => announceError(error, "Could not load tasks. Please try again."));
       } }, t("Cancel task"));
-      cancel.disabled = cancellingId === task.task_id;
+      cancel.disabled = cancellingId === task.task_id || !can("production:cancel");
       actions.append(cancel);
     }
     const card = el("article", { class: "studio-task", "data-task-id": task.task_id },
@@ -175,12 +148,12 @@ async function initializeStudio() {
   }
   async function selectTask(taskId) {
     selectedId = taskId;
-    localStorage.setItem("backlot.studio.last-task", taskId);
+    stream?.close();
+    await refresh();
+    localStorage.setItem(scopedKey("backlot.studio.last-task"), taskId);
     const url = new URL(location.href);
     if (url.searchParams.get("task") !== taskId) { url.searchParams.set("task", taskId); history.replaceState(null, "", url); }
-    stream?.close();
     stream = subscribeTask(taskId, () => refresh().catch((error) => announceError(error, "Could not load tasks. Please try again.")));
-    await refresh();
   }
   function localizeValidity(field) {
     if (!field.willValidate) return;
@@ -205,8 +178,21 @@ async function initializeStudio() {
     for (const field of form.elements) localizeValidity(field);
   });
   window.addEventListener("pagehide", () => stream?.close());
+  window.addEventListener("accountchange", () => {
+    stream?.close(); configPromise = null; config = null; tasks = []; selectedId = currentTask = null;
+    form.reset(); profileSelect.replaceChildren();
+    document.getElementById("production-inputs").disabled = true;
+    renderTasks();
+    const url = new URL(location.href); url.searchParams.delete("task"); history.replaceState(null, "", url);
+    announce("Your workspace changed. Review the current space before continuing.", true);
+  });
+  window.addEventListener("permissionschange", () => {
+    document.getElementById("production-inputs").disabled = !config?.ready || !can("production:create");
+    renderTasks(); profileInfo();
+    if (!can("production:create")) announce("You have read access to this workspace. Creating, approving and changing tasks is unavailable.");
+  });
   form.addEventListener("submit", async (event) => {
-    event.preventDefault(); if (submitting || !config?.ready || !form.reportValidity()) return;
+    event.preventDefault(); if (submitting || !config?.ready || !can("production:create") || !form.reportValidity()) return;
     submitting = true; profileInfo(); form.setAttribute("aria-busy", "true");
     try {
       const task = await studioAction("/api/studio/tasks", {
@@ -227,11 +213,11 @@ async function initializeStudio() {
     }
     profileSelect.value = config.default_profile;
     if (!config.profiles.find((item) => item.profile_id === profileSelect.value)?.ready) profileSelect.value = config.profiles.find((item) => item.ready)?.profile_id || "";
-    document.getElementById("production-inputs").disabled = !config.ready;
+    document.getElementById("production-inputs").disabled = !config.ready || !can("production:create");
     profileSelect.addEventListener("change", profileInfo); renderProfiles();
     if (!config.ready) { announce(config.unavailable_reason || "Studio is unavailable. Configure the backend to enable execution.", true); return; }
     announce("Ready. Tasks continue running when this browser is closed.");
-    const pending = JSON.parse(localStorage.getItem("backlot.studio.pending:/api/studio/tasks") || "null");
+    const pending = savedRequest("backlot.studio.pending:/api/studio/tasks");
     if (pending) {
       const draft = JSON.parse(pending.body);
       document.getElementById("brief").value = draft.brief;
@@ -244,7 +230,7 @@ async function initializeStudio() {
       announce("A previous submission is unconfirmed. Submit the same brief to recover its saved request.");
     }
     await refresh();
-    const savedId = new URLSearchParams(location.search).get("task") || localStorage.getItem("backlot.studio.last-task");
+    const savedId = new URLSearchParams(location.search).get("task") || localStorage.getItem(scopedKey("backlot.studio.last-task"));
     if (savedId && savedId !== selectedId) await selectTask(savedId);
   } catch (error) { announceError(error, config ? "Could not load tasks. Please try again." : "Could not load Studio. Please try again."); }
 }

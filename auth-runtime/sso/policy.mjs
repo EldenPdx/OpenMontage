@@ -13,12 +13,21 @@ const requestModel = "OpenMontageSamlRequest";
 const assertionModel = "OpenMontageSamlAssertion";
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 const identifier = (value) => typeof value === "string" && value.length > 0 && value.length <= 2048;
+const validBindings = (value) => value
+  && ["audience", "recipient", "destination", "bearerRequestId", "responseRequestId"].every((key) => identifier(value[key]))
+  && Number.isFinite(value.expiresAt) && value.expiresAt > Date.now();
 
 // Samlify supplies the signature-verified assertion as the extractor's shortcut.
 const extractFields = saml.Extractor.loginResponseFields;
 saml.Extractor.loginResponseFields = (assertion) => [
   ...extractFields(assertion),
   { key: "openmontageAssertion", localPath: ["Assertion"], attributes: ["ID"], shortcut: assertion },
+  { key: "openmontageConfirmation", localPath: ["Assertion", "Subject", "SubjectConfirmation"],
+    attributes: [], context: true, shortcut: assertion },
+  { key: "openmontageMethod", localPath: ["Assertion", "Subject", "SubjectConfirmation"],
+    attributes: ["Method"], shortcut: assertion },
+  { key: "openmontageBearer", localPath: ["Assertion", "Subject", "SubjectConfirmation", "SubjectConfirmationData"],
+    attributes: ["Recipient", "InResponseTo", "NotOnOrAfter"], shortcut: assertion },
 ];
 
 export async function registerSamlRequest(queries, jti, requestId, metadata) {
@@ -32,15 +41,24 @@ export async function registerSamlRequest(queries, jti, requestId, metadata) {
 
 export function verifiedSamlProfile(profile, extract) {
   const assertionId = extract.openmontageAssertion;
-  if (!identifier(assertionId) || !identifier(extract.issuer)) {
+  const bearer = extract.openmontageBearer;
+  const bindings = { audience: extract.audience, recipient: bearer?.recipient,
+    bearerRequestId: bearer?.inResponseTo, destination: extract.response?.destination,
+    responseRequestId: extract.response?.inResponseTo, expiresAt: Date.parse(bearer?.notOnOrAfter) };
+  if (!identifier(assertionId) || !identifier(extract.issuer)
+      || typeof extract.openmontageConfirmation !== "string"
+      || extract.openmontageMethod !== "urn:oasis:names:tc:SAML:2.0:cm:bearer"
+      || !validBindings(bindings)) {
     throw new Error("Native SSO response could not be verified");
   }
-  return { ...profile, openmontageAssertionHash: digest(extract.issuer + "\0" + assertionId) };
+  return { ...profile, openmontageAssertionHash: digest(extract.issuer + "\0" + assertionId),
+    openmontageBindings: bindings };
 }
 
 export function createSamlConsumption(pool, sql, table, fields) {
-  return async (jti, assertionHash) => {
-    if (!identifier(jti) || !/^[a-f0-9]{64}$/.test(assertionHash)) {
+  return async (jti, assertionHash, bindings) => {
+    if (!identifier(jti) || !/^[a-f0-9]{64}$/.test(assertionHash)
+        || !validBindings(bindings)) {
       throw new Error("Native SSO response is unavailable");
     }
     const requestKey = digest(jti);
@@ -49,6 +67,12 @@ export function createSamlConsumption(pool, sql, table, fields) {
         SELECT * FROM ${table}
         WHERE ${fields.modelName}=${requestModel} AND ${fields.id}=${requestKey}
           AND ${fields.consumedAt} IS NULL AND ${fields.expiresAt}>clock_timestamp()
+          AND ${fields.payload}->>'entityId'=${bindings.audience}
+          AND ${fields.payload}->>'acsUrl'=${bindings.recipient}
+          AND ${fields.payload}->>'acsUrl'=${bindings.destination}
+          AND ${fields.payload}->>'requestId'=${bindings.bearerRequestId}
+          AND ${fields.payload}->>'requestId'=${bindings.responseRequestId}
+          AND to_timestamp(${bindings.expiresAt / 1000})>clock_timestamp()
         FOR UPDATE
       ), new_assertion AS (
         INSERT INTO ${table}
@@ -71,5 +95,5 @@ export function createSamlConsumption(pool, sql, table, fields) {
 
 export async function consumeSamlResponse(queries, jti, profile) {
   if (!queries?.openmontageSamlConsume) throw new Error("Native SSO processing is unavailable");
-  await queries.openmontageSamlConsume(jti, profile.openmontageAssertionHash);
+  await queries.openmontageSamlConsume(jti, profile.openmontageAssertionHash, profile.openmontageBindings);
 }

@@ -8,6 +8,7 @@ import subprocess
 import sys
 
 import httpx
+import pytest
 
 from tests.fixtures.auth30 import sso_browser
 
@@ -15,7 +16,8 @@ ROOT = Path(__file__).resolve().parents[2]
 CLI = ROOT / "auth-runtime/sso/overlay.py"
 
 
-def test_operator_overlay_cli_seals_real_vendor_bytes_and_refuses_drift(tmp_path):
+@pytest.mark.parametrize("platform", ["linux/amd64", "linux/arm64"])
+def test_operator_overlay_cli_seals_real_vendor_bytes_and_refuses_drift(tmp_path, platform):
     vendor = tmp_path / "vendor"
     core = vendor / "packages/core"
     core.joinpath("build").mkdir(parents=True)
@@ -26,11 +28,12 @@ def test_operator_overlay_cli_seals_real_vendor_bytes_and_refuses_drift(tmp_path
     state = tmp_path / "state"
     state.mkdir(mode=0o700)
     command = [sys.executable, "-B", str(CLI), "prepare", "--state", str(state),
-        "--vendor-root", str(vendor), "--platform", "linux/arm64", "--pin-file", str(ROOT / "auth-runtime/images.lock.json")]
+        "--vendor-root", str(vendor), "--platform", platform, "--pin-file", str(ROOT / "auth-runtime/images.lock.json")]
     prepared = subprocess.run(command, capture_output=True, text=True)
     assert prepared.returncode == 0, "The operator must be able to prepare a sealed overlay for pinned vendor files"
     manifest = json.loads(prepared.stdout)
     assert manifest["vendor_version"] == "1.44.0"
+    assert manifest["platform"] == platform
     assert manifest["structural_only"] is True
     generated = Path(manifest["mounts"][0]["source"])
     assert generated.is_file() and generated.stat().st_mode & 0o777 == 0o600
@@ -54,6 +57,7 @@ def test_policy_reads_the_actual_signature_verified_assertion_identifier(monkeyp
         metadata = httpx.get(sso.fixture.idp["saml"]["metadata_url"], trust_env=False, timeout=10)
         assert metadata.status_code == 200
         payload = {"form": sso.saml_post, "metadata": metadata.text,
+            "entityId": sso.fixture.idp["saml"]["sp_entity_id"], "acsUrl": sso.fixture.idp["saml"]["acs_url"],
             "policy": ROOT.joinpath("auth-runtime/sso/policy.mjs").read_text()}
         script = r'''
 const fs = require("node:fs"), vm = require("node:vm"), assert = require("node:assert/strict");
@@ -67,6 +71,7 @@ const [valid, shortcut] = saml.SamlLib.verifySignature(raw,
   { metadata: idp.entityMeta, signatureAlgorithm: idp.entitySetting.requestSignatureAlgorithm });
 assert.equal(valid, true);
 assert.equal(typeof shortcut, "string");
+let extractionShape = {};
 (async () => {
   const url = "file:///etc/logto/packages/core/build/openmontage-sso.mjs";
   const policy = new vm.SourceTextModule(input.policy, { identifier: url,
@@ -80,15 +85,32 @@ assert.equal(typeof shortcut, "string");
   });
   await policy.evaluate();
   const extracted = saml.Extractor.extract(raw, saml.Extractor.loginResponseFields(shortcut));
+  extractionShape = { assertion: typeof extracted.openmontageAssertion, audience: typeof extracted.audience,
+    confirmation: typeof extracted.openmontageConfirmation,
+    bearerMethodMatches: extracted.openmontageMethod === "urn:oasis:names:tc:SAML:2.0:cm:bearer",
+    bearerKeys: Object.keys(extracted.openmontageBearer ?? {}), responseKeys: Object.keys(extracted.response ?? {}),
+    bearerExpiryFinite: Number.isFinite(Date.parse(extracted.openmontageBearer?.notOnOrAfter)),
+    bearerExpiryFuture: Date.parse(extracted.openmontageBearer?.notOnOrAfter) > Date.now() };
   assert.equal(typeof extracted.openmontageAssertion, "string");
   assert.ok(extracted.openmontageAssertion.length > 0);
   const profile = policy.namespace.verifiedSamlProfile({}, extracted);
   assert.match(profile.openmontageAssertionHash, /^[a-f0-9]{64}$/);
-  process.stdout.write(JSON.stringify({ signatureVerified: true, identifierIsString: true, policyAccepted: true }));
-})().catch(() => { process.exitCode = 1; });
+  assert.equal(profile.openmontageBindings.audience, input.entityId);
+  assert.equal(profile.openmontageBindings.recipient, input.acsUrl);
+  assert.equal(profile.openmontageBindings.destination, input.acsUrl);
+  assert.equal(profile.openmontageBindings.bearerRequestId, profile.openmontageBindings.responseRequestId);
+  assert.ok(profile.openmontageBindings.expiresAt > Date.now());
+  process.stdout.write(JSON.stringify({ signatureVerified: true, identifierIsString: true,
+    policyAccepted: true, bindingsMatchNativeMetadata: true }));
+})().catch(() => { process.stderr.write(JSON.stringify(extractionShape)); process.exitCode = 1; });
 '''
         result = subprocess.run(["docker", "exec", "-i", "openmontage-auth24-logto-1", "node",
             "--experimental-vm-modules", "-e", script], input=json.dumps(payload), text=True,
             capture_output=True, timeout=20)
+        if result.returncode != 0 and os.environ.get("AUTH30_EVIDENCE_DIR"):
+            path = Path(os.environ["AUTH30_EVIDENCE_DIR"]) / "extractor-shape.txt"
+            with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as output:
+                output.write(result.stderr)
         assert result.returncode == 0, "Actual signed native extraction must reach the local policy"
-        assert json.loads(result.stdout) == {"signatureVerified": True, "identifierIsString": True, "policyAccepted": True}
+        assert json.loads(result.stdout) == {"signatureVerified": True, "identifierIsString": True,
+            "policyAccepted": True, "bindingsMatchNativeMetadata": True}

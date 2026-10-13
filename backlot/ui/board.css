@@ -3,8 +3,6 @@
    Dark-room editorial: near-black matte canvas, artifacts glow.
    ============================================================ */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap');
-
 :root {
   --bg: #0a0a0c;
   --surface: #101013;

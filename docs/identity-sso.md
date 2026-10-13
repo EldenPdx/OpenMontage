@@ -36,7 +36,9 @@ Preparation/check is explicitly structural. It does not certify live activation 
 
 ## One-time native processing
 
-The native SAML request is recorded before its IdP URL is issued. Samlify validates the response signature, issuer and supported time checks; its signature-verified Assertion shortcut supplies the stable assertion identifier. A PostgreSQL statement locks an unexpired pending request, inserts a tenant-scoped unique assertion identifier hash and conditionally marks the request consumed. Concurrent delivery has one winner. A consumed response is not reopened after downstream failure or an unknown result. Database failures deny authentication. The outer BFF independently retains its existing one-time state/nonce/PKCE, private SDK storage and authoritative workspace checks.
+The native SAML request is recorded before its IdP URL is issued. Samlify validates the response signature, issuer and supported time checks; its signature-verified Assertion shortcut supplies the assertion identifier, Audience and bearer confirmation. The local policy requires the bearer method, an unexpired bearer timestamp, and the expected recipient. A PostgreSQL statement locks an unexpired pending request, compares the signed Audience/Recipient/request correlation and the response headers with the recorded SP/ACS/request values, checks expiry against database time, inserts a tenant-scoped unique assertion identifier hash and conditionally marks the request consumed. Response headers constrain the original request; they do not establish identity. Concurrent delivery has one winner. A consumed response is not reopened after downstream failure or an unknown result. Database failures deny authentication. The outer BFF independently retains its existing one-time state/nonce/PKCE, private SDK storage and authoritative workspace checks.
+
+The supported local SP profile has one Audience value and one bearer SubjectConfirmation. Additional SAML profiles require explicit configuration acceptance. IdP-initiated SSO is outside this implementation.
 
 ## Required acceptance
 
@@ -44,4 +46,43 @@ Run the dedicated real tests with the owner-provided `AUTH_TEST_FIXTURE`, isolat
 
 Required observations include standard OIDC and signed SAML through actual IdP → Logto → persistent BFF → explicit membership/role → owned resource, separate personal/organization contexts, denied foreign hints, same-email identity separation, native assertion and BFF callback replay, cancellation/provider failure/logout and secret isolation. Every invalid signed claim needs an otherwise identical accepting native control, with signature coverage, issuer, audience, bearer recipient, original request correlation and expiry checked at the intended boundary. A later BFF denial cannot certify rejection upstream.
 
-Current local policy verification covers identity separation and one-time native processing; the remaining signed claim matrix and complete independent final review are pending. Do not interpret structural output, a base identity test or generic CI as full #30 acceptance. Customer-specific IdPs, production rollout, paid/Cloud procurement and forced commercial MFA require separate validation and authorization.
+## Resumed verification and manual checks
+
+The resumed work follows the user's instruction to leave security testing to a human. Run only the normal-flow nodes below with the private environment described above. Do not run the whole SSO test files as a substitute for this selection.
+
+```sh
+python -B -m pytest -p tests.conftest \
+  auth-runtime/tests/test_sso.py::test_standard_oidc_sso_creates_a_persistent_personal_identity_and_owned_resource \
+  auth-runtime/tests/test_sso.py::test_standard_oidc_sso_selects_only_its_explicit_editor_membership \
+  auth-runtime/tests/test_sso.py::test_standard_signed_saml_sso_creates_its_own_persistent_personal_identity \
+  auth-runtime/tests/test_sso.py::test_standard_signed_saml_sso_keeps_explicit_a_viewer_and_b_editor_separate \
+  auth-runtime/tests/test_sso.py::test_user_can_leave_the_enterprise_login_screen_and_sign_in_again \
+  auth-runtime/tests/test_sso.py::test_browser_provider_network_failure_leaves_the_user_signed_out_and_allows_a_fresh_login \
+  auth-runtime/tests/test_sso.py::test_standard_enterprise_logout_returns_to_the_application_signed_out \
+  auth-runtime/tests/test_sso_overlay.py::test_policy_reads_the_actual_signature_verified_assertion_identifier \
+  auth-runtime/tests/test_sso_overlay.py::test_operator_overlay_cli_seals_real_vendor_bytes_and_refuses_drift -q
+```
+
+The loaded policy is `481b73ca3d584e7a334b1b1851f0dbdc3945234b4f881db741c5af00ca85f524`; the generated vendor bundle is `ca9382f06831480941a9b0a78e340c393fcf6f643e62a1adf8902c52702df0ed`. The lifecycle owner's protected receipt records actual read-only mounts, running file hashes, unchanged image provenance, startup health and unchanged fixture ledgers. The ordinary cases passed against this policy with Logto 1.44.0, Keycloak 26.8.0, samlify 2.13.1 and PostgreSQL 17.11 on the ARM64 local Docker stack.
+
+| Observation | Actual result |
+| --- | --- |
+| OIDC personal identity and explicitly provisioned organization editor; signed SAML stable personal identity and separate A/viewer, B/editor workspaces; owned resource access | 4 passed |
+| Fresh signed SAML accepted by the real samlify extractor and the current binding policy | 1 passed |
+| User leaves the IdP credential page, returns to the application signed out, then completes a fresh OIDC/SAML login | 2 passed |
+| This browser's connection to either IdP or Logto fails; no application session is created; fresh OIDC/SAML login succeeds after recovery | 4 passed |
+| Normal OIDC/SAML logout revokes application resource access and returns through the configured Logto end-session endpoint | 2 passed |
+| Operator prepare/check seals pristine vendor bytes for each supported platform descriptor | 2 passed; structural only |
+
+These 15 observations had zero failures and zero skips. Browser network cases abort only that page's outbound connection; they do not stop either shared service or establish server-side outage behavior. Leaving the credential page verifies ordinary abandonment, not an IdP-specific cancellation callback. The two platform descriptors establish preparation support; native AMD64 host execution remains unverified.
+
+The following security checks are assigned to the user and were not rerun or newly created in this resumed work:
+
+- Invalid OIDC/SAML issuer, audience, recipient, destination, request correlation, timestamps, signature coverage and unsupported SAML confirmation profiles, including an accepting control for each rejection.
+- Repeated or concurrent assertion, token or callback delivery, and reuse of revoked browser credentials.
+- Distinct IdP identities with equal email addresses, non-member organization hints and foreign organization access.
+- Protocol error and credential/assertion isolation in failure diagnostics, ordinary logs, public URLs, browser storage and business records.
+
+IdP-specific cancellation, customer configuration errors and real IdP/Logto service outages also need operator verification; the browser recovery observations above do not certify those cases. Historical evidence at policy checkpoint `dada3164851d237c6e4ef5411fc7df87c96e4617` recorded 13 passing cases against the earlier partial policy, including identity separation and native one-time processing. Retain it as historical evidence; it does not certify the current full claim-binding policy's rejection matrix.
+
+The signed claim matrix, manual checks and complete independent final review remain pending. Do not interpret structural output, normal login acceptance or generic CI as full security acceptance for #30. Customer-specific IdPs, production rollout, paid/Cloud procurement and forced commercial MFA require separate validation and authorization.
