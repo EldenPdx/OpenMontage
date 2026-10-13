@@ -25,6 +25,14 @@ def authenticated_resource(context, task, expected):
 
 
 def test_coordinated_native_and_business_restore_preserves_oidc_saml_principals_old_cookie_keys_and_media(monkeypatch):
+    coordinated_restore(monkeypatch, check_wrong_key=False)
+
+
+def test_coordinated_native_restore_rejects_a_wrong_session_key(monkeypatch):
+    coordinated_restore(monkeypatch, check_wrong_key=True)
+
+
+def coordinated_restore(monkeypatch, *, check_wrong_key):
     # Missing operator input fails before any schema, listener, identity request or process is started.
     directory, plan = recovery_plan()
     owner = Path(plan["owner_state_dir"])
@@ -120,12 +128,13 @@ def test_coordinated_native_and_business_restore_preserves_oidc_saml_principals_
                 before_worker = restored.get_task(task["task_id"]).public_dict()
                 sso.run_worker()
                 assert restored.get_task(task["task_id"]).public_dict() == before_worker
-            wrong_key = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode()
-            with recovery_bff(target, target_configuration, restored, fixture, monkeypatch, studio_configuration=studio_configuration, key=wrong_key) as (sso, _):
-                denied = sso.browser.new_context()
-                denied.add_cookies(cookies["oidc"])
-                assert denied.request.get(ORIGIN + "/api/auth/me").status == 503
-                assert denied.request.get(ORIGIN + task["result"]["download_url"]).status == 503
+            if check_wrong_key:
+                wrong_key = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode()
+                with recovery_bff(target, target_configuration, restored, fixture, monkeypatch, studio_configuration=studio_configuration, key=wrong_key) as (sso, _):
+                    denied = sso.browser.new_context()
+                    denied.add_cookies(cookies["oidc"])
+                    assert denied.request.get(ORIGIN + "/api/auth/me").status == 503
+                    assert denied.request.get(ORIGIN + task["result"]["download_url"]).status == 503
             observed_source = {name: native_sql_snapshot(baseline["identity-postgres"]["container_id"], database)
                                for name, database in native_sources.items()}
             assert observed_source == native_frozen, "Independent read-only observation found changed original Native data"
