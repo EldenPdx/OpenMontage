@@ -221,7 +221,8 @@
         "tests/integration/test_identity_validation_cli.py::test_coordinated_phase_requires_its_recovery_operator_to_succeed[operator-failed]",
         "tests/integration/test_identity_recovery_control.py::test_native_recovery_operator_prepares_a_fresh_private_plan_without_services",
         "tests/integration/test_identity_validation_cli.py::test_external_review_can_collect_ordinary_tests_with_the_project_plugin",
-        "tests/integration/test_identity_validation_cli.py::test_recorded_sso_proof_uses_the_recovery_consumer_schema"
+        "tests/integration/test_identity_validation_cli.py::test_recorded_sso_proof_uses_the_recovery_consumer_schema[oidc-editor]",
+        "tests/integration/test_identity_validation_cli.py::test_recorded_sso_proof_uses_the_recovery_consumer_schema[saml-cross-member]"
       ]
     },
     "bff": {
@@ -484,7 +485,15 @@
         "auth-runtime/tests/test_sso_claims.py::test_trusted_signed_saml_fixed_claims_are_rejected_before_native_continuation[wrong_bearer_in_response_to]",
         "auth-runtime/tests/test_sso_claims.py::test_trusted_signed_saml_fixed_claims_are_rejected_before_native_continuation[wrong_response_in_response_to]",
         "auth-runtime/tests/test_sso_claims.py::test_trusted_signed_saml_fixed_claims_are_rejected_before_native_continuation[wrong_destination]",
-        "auth-runtime/tests/test_sso_claims.py::test_saml_corrupt_outer_response_signature_is_rejected_before_native_continuation"
+        "auth-runtime/tests/test_sso_claims.py::test_saml_corrupt_outer_response_signature_is_rejected_before_native_continuation",
+        "auth-runtime/tests/test_sso.py::test_browser_provider_network_failure_leaves_the_user_signed_out_and_allows_a_fresh_login[idp-oidc-A]",
+        "auth-runtime/tests/test_sso.py::test_browser_provider_network_failure_leaves_the_user_signed_out_and_allows_a_fresh_login[idp-saml-B]",
+        "auth-runtime/tests/test_sso.py::test_browser_provider_network_failure_leaves_the_user_signed_out_and_allows_a_fresh_login[logto-oidc-A]",
+        "auth-runtime/tests/test_sso.py::test_browser_provider_network_failure_leaves_the_user_signed_out_and_allows_a_fresh_login[logto-saml-B]",
+        "auth-runtime/tests/test_sso.py::test_user_can_leave_the_enterprise_login_screen_and_sign_in_again[oidc-A]",
+        "auth-runtime/tests/test_sso.py::test_user_can_leave_the_enterprise_login_screen_and_sign_in_again[saml-B]",
+        "auth-runtime/tests/test_sso.py::test_standard_enterprise_logout_returns_to_the_application_signed_out[oidc-A]",
+        "auth-runtime/tests/test_sso.py::test_standard_enterprise_logout_returns_to_the_application_signed_out[saml-B]"
       ]
     },
     "ui": {

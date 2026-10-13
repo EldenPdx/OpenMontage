@@ -132,6 +132,8 @@ def test_validation_plan_keeps_real_login_automatic_and_protocol_checks_pending(
     assert plan["manual_pending_operations"] == ["dependency-failure-calibration"]
     assert "auth-runtime/tests/test_studio_auth28.py::test_long_verified_result_stops_before_remaining_bytes_after_logout[outage]" in manual
     assert "auth-runtime/tests/test_studio_auth28.py::test_long_verified_result_stops_before_remaining_bytes_after_logout[logout]" in automatic
+    assert "auth-runtime/tests/test_sso.py::test_standard_enterprise_logout_returns_to_the_application_signed_out[oidc-A]" in automatic
+    assert "auth-runtime/tests/test_sso.py::test_enterprise_secrets_stay_private_and_logout_revokes_the_resource_session[oidc-A]" in manual
 
 
 def test_restore_plans_use_separate_empty_database_targets():
@@ -232,17 +234,17 @@ def test_sso_fixture_setup_requires_the_private_lifecycle_owner(tmp_path):
     assert result.stderr.strip() == "SSO fixture setup requires this checkout's private lifecycle-owner state"
 
 
-def test_recorded_sso_proof_uses_the_recovery_consumer_schema():
+@pytest.mark.parametrize("memberships", [{"A": ["editor"]}, {"A": ["viewer"], "B": ["editor"]}], ids=("oidc-editor", "saml-cross-member"))
+def test_recorded_sso_proof_uses_the_recovery_consumer_schema(memberships):
     # This checks the record interface only; it is not a Native sign-in result.
-    record = {"native_subject": "observed-saml-subject", "connector_id": "fixture-saml-connector",
+    record = {"native_subject": "observed-native-subject", "connector_id": "fixture-connector",
               "sso_identity_id": "persistent-name-id", "sso_issuer": "https://idp.example/realms/fixture"}
-    memberships = {"A": ["viewer"], "B": ["editor"]}
     script = "import sys,json;sys.path.insert(0,'auth-runtime');import ci;print(json.dumps(ci.sso_subject_proof(" + repr(record) + "," + repr(memberships) + ")))"
     result = subprocess.run([sys.executable, "-B", "-c", script], cwd=ROOT, capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {"native_subject": "observed-saml-subject", "connector_id": "fixture-saml-connector",
+    assert json.loads(result.stdout) == {"native_subject": "observed-native-subject", "connector_id": "fixture-connector",
                                        "identity_id": "persistent-name-id", "issuer": "https://idp.example/realms/fixture",
-                                       "memberships": {"A": ["viewer"], "B": ["editor"]}}
+                                       "memberships": memberships}
 
 
 def test_cleanup_refuses_a_live_native_recovery_operator(tmp_path):
