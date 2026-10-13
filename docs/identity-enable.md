@@ -2,6 +2,8 @@
 
 This is the operator runbook for #32. Production activation remains a manual operator action. The final acceptance record must identify the exact application commit, both required CI jobs, independently reproduced scenarios, and the verified backup before these steps are used. Current #30/#31 integration and #32 operator rehearsals remain pending; this document is not a deployment signoff.
 
+The user has reserved protocol manipulation/replay, same-email identity collision, crafted security inputs and authority/DB/provider failure-injection acceptance for manual execution. Follow the [direct operator checklist](identity-manual-validation.md) and [split verification commands](identity-validation-matrix.md#automatic-verification-and-manual-security-acceptance). Ordinary browser transport recovery remains automatic. Automatic CI green reports the automatic scope; it does not authorize activation or close the remaining identity Issues. Retain exact-candidate manual outcomes and the separate dependency-fault receipt before claiming complete acceptance.
+
 Read [the contracts](identity-contracts.md), [BFF configuration](identity-bff.md), [historical ownership operations](identity-migration.md), [the isolated environment](identity-environment.md), and [the validation matrix](identity-validation-matrix.md). Use their existing interfaces and preserve canonical projects, approvals, cost journals, leases, fences, and exact Pi session references.
 
 ## Prepare the maintenance window
@@ -24,7 +26,7 @@ Native Logto 1.44.0 OSS exposes a coarse `all` Management API scope. Do not desc
 
 Take coordinated, quiescent backups of the identity database, Keycloak database/configuration, business schema and canonical files/Pi sessions. Preserve the authority signing material, application/Management/IdP credentials, SSO policy overlay/version, exact issuer and private session-key ring separately. The OpenMontage archive intentionally excludes raw encryption keys; retaining only the archive cannot decrypt private sessions after restore. Record hashes and recovery order in the private operator ledger. Protect database dumps and raw mail/assertion/session evidence as secrets.
 
-The dedicated [Native recovery drill](identity-native-recovery.md) defines the required owner-only maintenance handshake, fresh empty clone targets, independent source-retention observations and actual OIDC/SAML/old-session/media checks. Its lifecycle helper and real execution are still pending; the earlier business-only restore rehearsal does not satisfy coordinated Native recovery.
+The dedicated [Native recovery drill](identity-native-recovery.md) defines the implemented owner-only lifecycle helper, fresh empty clone targets, independent source-retention observations and actual OIDC/SAML/old-session/media checks. Positive coordinated recovery runs in the automatic suite; wrong-key and the existing mixed key-tamper/rotation rehearsal run in the human-selected suite. Actual exact-candidate results remain pending. Use separate empty business targets for the two drills; the earlier business-only restore rehearsal does not satisfy coordinated Native recovery.
 
 Use the released commands with absolute private path references:
 
