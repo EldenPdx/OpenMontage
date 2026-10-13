@@ -10,6 +10,7 @@ import secrets
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from urllib.parse import urlsplit
 
@@ -198,13 +199,20 @@ class RecoveryOperator:
 
     def publish_environment(self, filename, value):
         path = self.owner / filename
-        temporary = self.owner / (filename + ".recovery-pending")
-        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-        with os.fdopen(descriptor, "wb") as output:
-            output.write(value)
-            output.flush()
-            os.fsync(output.fileno())
-        temporary.replace(path)
+        descriptor, temporary = tempfile.mkstemp(prefix="." + filename + ".recovery-", dir=self.owner)
+        try:
+            with os.fdopen(descriptor, "wb") as output:
+                output.write(value)
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary, path)
+            parent = os.open(self.owner, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                os.fsync(parent)
+            finally:
+                os.close(parent)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
 
     def restore_original(self):
         from tests.fixtures.auth32_native_recovery import native_sql_snapshot, native_state
