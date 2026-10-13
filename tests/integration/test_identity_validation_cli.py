@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import shutil
+import tempfile
 
 import pytest
 
@@ -129,6 +130,8 @@ def test_validation_plan_keeps_real_login_automatic_and_protocol_checks_pending(
     assert automatic | manual == {node for definition in catalog["phases"].values() for node in definition["nodes"]}
     assert plan["suite"] == "automated" and plan["acceptance_status"] == "PENDING"
     assert plan["manual_pending_operations"] == ["dependency-failure-calibration"]
+    assert "auth-runtime/tests/test_studio_auth28.py::test_long_verified_result_stops_before_remaining_bytes_after_logout[outage]" in manual
+    assert "auth-runtime/tests/test_studio_auth28.py::test_long_verified_result_stops_before_remaining_bytes_after_logout[logout]" in automatic
 
 
 def test_restore_plans_use_separate_empty_database_targets():
@@ -160,6 +163,18 @@ def test_default_regression_deselects_manual_checks_and_reports_pending(tmp_path
     opted = subprocess.run([sys.executable, "-B", "-m", "pytest", "-p", "no:cacheprovider", "-q", "--include-manual-security", "tests/"],
                            cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=10)
     assert opted.returncode != 0 and "manual selection witness" in opted.stdout
+
+
+def test_external_review_can_collect_ordinary_tests_with_the_project_plugin():
+    environment = {**os.environ, "PYTHONPATH": str(ROOT), "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"}
+    environment.pop("PYTEST_ADDOPTS", None)
+    with tempfile.TemporaryDirectory(prefix="openmontage-review-") as directory:
+        (Path(directory) / "test_review.py").write_text("def test_ordinary_review():\n    pass\n")
+        result = subprocess.run([sys.executable, "-B", "-m", "pytest", "-p", "tests.conftest", "-p", "no:cacheprovider",
+                                 "--collect-only", "-q", "test_review.py"], cwd=directory, env=environment,
+                                capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "1 test collected" in result.stdout
 
 
 def test_required_phase_runs_only_the_exact_reviewed_nodes(tmp_path):

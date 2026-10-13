@@ -134,14 +134,20 @@ def pytest_collection_modifyitems(config, items):
     """Keep manual security acceptance visible without running it by default."""
     try:
         path = Path(__file__).resolve().parents[1] / "auth-runtime/manual-security.json"
-        functions = json.loads(path.read_text())["functions"]
+        manual = json.loads(path.read_text())
+        functions = manual["functions"]
+        variants = set(manual.get("nodes", []))
         if not functions or len(set(functions)) != len(functions) or any("::" not in name for name in functions):
             raise ValueError
     except (OSError, ValueError, KeyError, TypeError):
         raise pytest.UsageError("Explicit manual security manifest is missing or invalid") from None
     if not config.getoption("include_manual_security"):
-        pending = [item for item in items if
-                   item.path.relative_to(path.parents[1]).as_posix() + "::" + item.nodeid.split("::", 1)[1].split("[", 1)[0] in functions]
+        pending = []
+        for item in items:
+            if item.path.is_relative_to(path.parents[1]):
+                node = item.path.relative_to(path.parents[1]).as_posix() + "::" + item.nodeid.split("::", 1)[1]
+                if node.split("[", 1)[0] in functions or node in variants:
+                    pending.append(item)
         if pending:
             config._manual_security_pending = len(pending)
             config.hook.pytest_deselected(items=pending)

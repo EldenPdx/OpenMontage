@@ -35,15 +35,16 @@ def validation_plan(suite):
     catalog = json.loads((ROOT / "auth-runtime/required-nodes.json").read_text())
     manual = json.loads((ROOT / "auth-runtime/manual-security.json").read_text())
     functions = set(manual["functions"])
+    manual_variants = set(manual.get("nodes", []))
     all_nodes = [node for definition in catalog["phases"].values() for node in definition["nodes"]]
-    if len(all_nodes) != len(set(all_nodes)) or not functions or functions - {node.split("[", 1)[0] for node in all_nodes}:
+    if len(all_nodes) != len(set(all_nodes)) or not functions or functions - {node.split("[", 1)[0] for node in all_nodes} or manual_variants - set(all_nodes):
         raise RuntimeError("Required identity catalog must uniquely account for every explicit manual security function")
     phases = {}
     manual_nodes = []
     for name, definition in catalog["phases"].items():
         selected = []
         for node in definition["nodes"]:
-            is_manual = node.split("[", 1)[0] in functions
+            is_manual = node.split("[", 1)[0] in functions or node in manual_variants
             if is_manual:
                 manual_nodes.append(node)
             if is_manual == (suite == "manual-security"):
